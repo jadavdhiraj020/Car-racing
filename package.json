@@ -1,0 +1,29 @@
+{
+  "name": "apex-friends-racing",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "node server/index.js --dev",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "test": "node --test",
+    "test:browser": "node scripts/browser-check.mjs",
+    "format": "prettier --write client server shared test scripts *.js *.json"
+  },
+  "dependencies": {
+    "@babylonjs/core": "^8.0.0",
+    "cannon-es": "^0.20.0",
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "prettier": "^3.9.6",
+    "vite": "^7.1.0"
+  }
+}
