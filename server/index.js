@@ -25,7 +25,7 @@ export async function createGame({ dev = false } = {}) {
     "#b5f363",
     "#ffcf57",
     "#c999ff",
-    "#ff8dc7",
+    "#ff9c45",
   ];
   const state = (r) => ({
     code: r.code,

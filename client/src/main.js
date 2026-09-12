@@ -16,7 +16,7 @@ let view,
   sound = false,
   lastCountdown = "",
   lastPhase = "",
-  low = false;
+  quality = 1;
 function notice(text) {
   $("toast").textContent = text;
   $("toast").style.display = "block";
@@ -60,9 +60,9 @@ $("sound").onclick = () => {
   if (!sound && gain) gain.gain.value = 0;
 };
 $("quality").onclick = () => {
-  low = !low;
-  view?.quality(low);
-  $("quality").textContent = low ? "QUALITY LOW" : "QUALITY HIGH";
+  quality = (quality + 1) % 3;
+  view?.quality(quality);
+  $("quality").textContent = "QUALITY " + ["LOW", "MEDIUM", "HIGH"][quality];
 };
 const invite = new URLSearchParams(location.search).get("room");
 if (invite) $("code").value = invite.toUpperCase().slice(0, 5);

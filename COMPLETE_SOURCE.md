@@ -1,6 +1,6 @@
 # Complete APEX source code
 
-All source and configuration files, including the lockfile. Generated files and this listing itself are excluded.
+All source and configuration files. Generated files and this listing itself are excluded.
 
 ## .gitignore
 
@@ -2546,7 +2546,7 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/index.html`
       <div class="top-right">
         <span id="connection">CONNECTING</span
         ><button id="sound" class="small">SOUND OFF</button
-        ><button id="quality" class="small">QUALITY HIGH</button>
+        ><button id="quality" class="small">QUALITY MEDIUM</button>
       </div>
     </header>
     <main id="home">
@@ -3218,7 +3218,7 @@ export function createScene(canvas) {
     stencil: false,
     preserveDrawingBuffer: true,
   });
-  engine.setHardwareScalingLevel(Math.max(1, devicePixelRatio / 1.5));
+  engine.setHardwareScalingLevel(1.5);
   const scene = new Scene(engine);
   scene.clearColor = new Color4(0.64, 0.79, 0.74, 1);
   scene.fogMode = Scene.FOGMODE_EXP2;
@@ -3539,10 +3539,7 @@ export function createScene(canvas) {
   window.addEventListener("resize", () => engine.resize());
   return {
     update,
-    quality: (low) =>
-      engine.setHardwareScalingLevel(
-        low ? 2 : Math.max(1, devicePixelRatio / 1.5),
-      ),
+    quality: (level) => engine.setHardwareScalingLevel([2, 1.5, 1][level]),
     scene,
   };
 }
@@ -3572,7 +3569,7 @@ let view,
   sound = false,
   lastCountdown = "",
   lastPhase = "",
-  low = false;
+  quality = 1;
 function notice(text) {
   $("toast").textContent = text;
   $("toast").style.display = "block";
@@ -3616,9 +3613,9 @@ $("sound").onclick = () => {
   if (!sound && gain) gain.gain.value = 0;
 };
 $("quality").onclick = () => {
-  low = !low;
-  view?.quality(low);
-  $("quality").textContent = low ? "QUALITY LOW" : "QUALITY HIGH";
+  quality = (quality + 1) % 3;
+  view?.quality(quality);
+  $("quality").textContent = "QUALITY " + ["LOW", "MEDIUM", "HIGH"][quality];
 };
 const invite = new URLSearchParams(location.search).get("room");
 if (invite) $("code").value = invite.toUpperCase().slice(0, 5);
@@ -3895,12 +3892,12 @@ export const TRACK = {
   width: 18,
   laps: 3,
   maxPlayers: 6,
-  segments: 120,
+  segments: 180,
 };
-// A stadium loop: long straights connected by semicircles. Travel clockwise.
-export const LENGTH = 160 + 2 * Math.PI * 48;
-export function point(s, offset = 0) {
-  s = ((s % LENGTH) + LENGTH) % LENGTH;
+// Long start straight, broad sweepers, and a tighter left/right chicane.
+const BASE_LENGTH = 160 + 2 * Math.PI * 48;
+function basePoint(s, offset = 0) {
+  s = ((s % BASE_LENGTH) + BASE_LENGTH) % BASE_LENGTH;
   let x, z, yaw;
   if (s < 80) {
     x = 48;
@@ -3912,9 +3909,13 @@ export function point(s, offset = 0) {
     z = 40 + 48 * Math.sin(a);
     yaw = -a;
   } else if (s < 160 + Math.PI * 48) {
-    x = -48;
-    z = 40 - (s - 80 - Math.PI * 48);
-    yaw = -Math.PI;
+    const t = (s - 80 - Math.PI * 48) / 80;
+    x = -48 + 9 * Math.sin(2 * Math.PI * t) ** 3;
+    z = 40 - 80 * t;
+    yaw = Math.atan2(
+      54 * Math.PI * Math.sin(2 * Math.PI * t) ** 2 * Math.cos(2 * Math.PI * t),
+      -80,
+    );
   } else {
     const a = (s - 160 - Math.PI * 48) / 48;
     x = -48 * Math.cos(a);
@@ -3923,17 +3924,60 @@ export function point(s, offset = 0) {
   }
   return { x: x + Math.cos(yaw) * offset, z: z - Math.sin(yaw) * offset, yaw };
 }
+
+// Arc-length lookup keeps checkpoint spacing and progress consistent through the chicane.
+const samples = Array.from({ length: 961 }, (_, i) =>
+  basePoint((i * BASE_LENGTH) / 960),
+);
+const lengths = [0];
+for (let i = 1; i < samples.length; i++)
+  lengths.push(
+    lengths[i - 1] +
+      Math.hypot(
+        samples[i].x - samples[i - 1].x,
+        samples[i].z - samples[i - 1].z,
+      ),
+  );
+export const LENGTH = lengths.at(-1);
+export function point(s, offset = 0) {
+  s = ((s % LENGTH) + LENGTH) % LENGTH;
+  let lo = 0,
+    hi = lengths.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (lengths[mid] <= s) lo = mid;
+    else hi = mid;
+  }
+  const a = samples[lo],
+    b = samples[hi],
+    t = (s - lengths[lo]) / (lengths[hi] - lengths[lo]);
+  const delta = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw)),
+    yaw = a.yaw + delta * t;
+  return {
+    x: a.x + (b.x - a.x) * t + Math.cos(yaw) * offset,
+    z: a.z + (b.z - a.z) * t - Math.sin(yaw) * offset,
+    yaw,
+  };
+}
 export function nearest(x, z) {
-  let s;
-  if (z > 40) {
-    let a = Math.atan2(z - 40, x);
-    s = 80 + 48 * a;
-  } else if (z < -40) {
-    let a = Math.atan2(-z - 40, -x);
-    s = 160 + Math.PI * 48 + 48 * a;
-  } else s = x >= 0 ? z + 40 : 80 + Math.PI * 48 + 40 - z;
-  const p = point(s);
-  return { s, distance: Math.hypot(x - p.x, z - p.z) };
+  let best = Infinity,
+    s = 0;
+  for (let i = 0; i < samples.length - 1; i++) {
+    const a = samples[i],
+      b = samples[i + 1],
+      dx = b.x - a.x,
+      dz = b.z - a.z;
+    const t = Math.max(
+      0,
+      Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz)),
+    );
+    const distance = (x - a.x - dx * t) ** 2 + (z - a.z - dz * t) ** 2;
+    if (distance < best) {
+      best = distance;
+      s = lengths[i] + t * (lengths[i + 1] - lengths[i]);
+    }
+  }
+  return { s: s % LENGTH, distance: Math.sqrt(best) };
 }
 export const gates = Array.from({ length: 24 }, (_, i) =>
   point((i * LENGTH) / 24),
@@ -4136,7 +4180,7 @@ export async function createGame({ dev = false } = {}) {
     "#b5f363",
     "#ffcf57",
     "#c999ff",
-    "#ff8dc7",
+    "#ff9c45",
   ];
   const state = (r) => ({
     code: r.code,
@@ -4320,6 +4364,19 @@ import { io } from "socket.io-client";
 import { Race } from "../server/race.js";
 import { createGame } from "../server/index.js";
 import { point, LENGTH, nearest } from "../shared/track.js";
+
+test("circuit has left/right turns, sharp bends, sweepers and a long straight", () => {
+  let left = false, right = false, sharp = false, wide = false, straight = 0, longest = 0;
+  for(let s=0;s<LENGTH;s++) {
+    const a=point(s),b=point(s+1);
+    const turn=Math.atan2(Math.sin(b.yaw-a.yaw),Math.cos(b.yaw-a.yaw));
+    left ||= turn < -0.01; right ||= turn > 0.01;
+    sharp ||= Math.abs(turn)>0.055;
+    wide ||= Math.abs(turn)>0.015 && Math.abs(turn)<0.03;
+    straight=Math.abs(turn)<0.001?straight+1:0;longest=Math.max(longest,straight);
+  }
+  assert.ok(left && right && sharp && wide);assert.ok(longest>=60);
+});
 test("track is continuous and nearest recovers distance", () => {
   for (let s = 0; s < LENGTH; s += 0.7) {
     const p = point(s);
@@ -4573,6 +4630,11 @@ await mkdir("test-artifacts", { recursive: true });
 try {
   await a.goto(base);
   await a.locator("#connection").filter({ hasText: "ONLINE" }).waitFor();
+  assert.equal(await a.locator("#quality").textContent(), "QUALITY MEDIUM");
+  for (const label of ["HIGH", "LOW", "MEDIUM"]) {
+    await a.locator("#quality").click();
+    assert.equal(await a.locator("#quality").textContent(), "QUALITY " + label);
+  }
   await a.waitForTimeout(2500);
   await a.screenshot({ path: "test-artifacts/home.png" });
   await a.locator("#nickname").fill("Dhiraj");
@@ -4677,7 +4739,7 @@ A complete friends-only racing project: Babylon.js graphics, an authoritative No
 
 | Part | Choice | Purpose |
 |---|---|---|
-| 3D | Babylon.js 8 | Procedural cars, stadium track, palm trees, follow camera |
+| 3D | Babylon.js 8 | Procedural cars, chicane circuit, palm trees, follow camera |
 | Physics | cannon-es 0.20 (MIT) | Server-side gravity, ground and barrier collisions |
 | Multiplayer | Socket.IO 4 | 30 input packets/second, 20 room snapshots/second |
 | Server | Node.js 24, Express 5 | Serves the website and runs each race |
@@ -4784,7 +4846,7 @@ Screenshots are written to `test-artifacts/`. Chrome automation uses a temporary
 5. Click the game area if needed. Hold W to accelerate; use A/D to steer. In the other window watch the first car move. Use R if stuck. If a window loses focus, controls release automatically.
 6. Follow the loop and glowing gate posts for three laps. Each finish registers on the server. After both finish (or the timeout), the host clicks **RUN IT BACK ↻**, then starts again.
 
-Controls: W/Up accelerate; S/Down brake then reverse; A/Left and D/Right steer; Space drift; R reset. Touch buttons appear on devices with coarse pointers. Sound is opt-in using **SOUND OFF**; it enables synthesized engine and countdown/results tones. Low quality reduces render resolution. No downloaded music or models.
+Controls: W/Up accelerate; S/Down brake then reverse; A/Left and D/Right steer; Space drift; R reset. Touch buttons appear on devices with coarse pointers. Sound is opt-in using **SOUND OFF**; it enables synthesized engine and countdown/results tones. Graphics defaults to Medium; the quality button cycles through High, Low, and Medium, changing render resolution. No downloaded music or models.
 
 Testing over your home Wi-Fi requires the PC's LAN address, not localhost. Run `ipconfig`, find the active Wi-Fi adapter's IPv4 address, and open `http://THAT-ADDRESS:3000` on the other device. If Windows asks, allow Node on your trusted private network. The easiest test between different homes is the deployed HTTPS URL below; do not forward router ports.
 
@@ -4914,7 +4976,7 @@ No public URL exists yet. Render will assign one like `https://apex-friends-raci
 | Works locally but not online | Wrong root/build/start/port | Use the exact Render table above, root blank, `npm ci --include=dev && npm run build`, `npm start`; app must keep supplied PORT behavior. |
 | HTTPS/WSS or mixed-content error | Hardcoded HTTP server | Restore same-origin `io()`. Use Render's HTTPS URL. Rebuild/redeploy. |
 | Blank 3D screen | WebGL disabled or outdated driver/browser | In Chrome Settings → System enable graphics acceleration, relaunch Chrome, update graphics driver; try Edge. Verify `/health` and reload Ctrl+F5. |
-| Low frame rate | High pixel density, weak GPU or software rendering | Click **QUALITY HIGH** to switch to Low; close extra 3D browser windows; enable hardware acceleration. |
+| Low frame rate | High pixel density, weak GPU or software rendering | Click the quality button until it reads **QUALITY LOW**; close extra 3D browser windows; enable hardware acceleration. |
 | Car falls through road | Modified ground/physics code | Original track has a ground plane. Press R. Restore `server/race.js` ground setup and flat track; server auto-resets out-of-bounds cars. |
 | Car stuck at barrier | Steering into wall | Brake/reverse with S or press R (2-second reset cooldown). |
 | Remote cars not moving | Race not started, connection lost, input window unfocused | Wait for GO; focus the driving window; verify ONLINE indicator and `/health`. Disconnected players must rejoin the next lobby. |
@@ -4993,5 +5055,11 @@ The browser script requires installed Google Chrome. It runs a temporary local p
 - Free-tier availability and allowance can change; official hosting references are in README.md.
 
 The local implementation is working under the tests above. The complete online goal remains pending one-time account setup and a public race check.
+
+## Follow-up verification
+
+The circuit now includes a long straight, broad sweepers and a tighter left/right chicane. Eight server tests pass, including explicit turn geometry and three physically driven laps on the revised circuit. Graphics now defaults to Medium and offers Low/Medium/High. GitHub account access was confirmed as jadavdhiraj020; no repository is linked and Render access is not available. Public deployment remains blocked on the external account steps.
+
+The follow-up two-page Chrome run also passed, including all three graphics settings, room creation/join, countdown, keyboard driving, result fixture, rematch and leave, with no page JavaScript errors.
 
 ````

@@ -44,3 +44,9 @@ The browser script requires installed Google Chrome. It runs a temporary local p
 - Free-tier availability and allowance can change; official hosting references are in README.md.
 
 The local implementation is working under the tests above. The complete online goal remains pending one-time account setup and a public race check.
+
+## Follow-up verification
+
+The circuit now includes a long straight, broad sweepers and a tighter left/right chicane. Eight server tests pass, including explicit turn geometry and three physically driven laps on the revised circuit. Graphics now defaults to Medium and offers Low/Medium/High. GitHub account access was confirmed as jadavdhiraj020; no repository is linked and Render access is not available. Public deployment remains blocked on the external account steps.
+
+The follow-up two-page Chrome run also passed, including all three graphics settings, room creation/join, countdown, keyboard driving, result fixture, rematch and leave, with no page JavaScript errors.

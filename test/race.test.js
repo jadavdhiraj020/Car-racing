@@ -4,6 +4,19 @@ import { io } from "socket.io-client";
 import { Race } from "../server/race.js";
 import { createGame } from "../server/index.js";
 import { point, LENGTH, nearest } from "../shared/track.js";
+
+test("circuit has left/right turns, sharp bends, sweepers and a long straight", () => {
+  let left = false, right = false, sharp = false, wide = false, straight = 0, longest = 0;
+  for(let s=0;s<LENGTH;s++) {
+    const a=point(s),b=point(s+1);
+    const turn=Math.atan2(Math.sin(b.yaw-a.yaw),Math.cos(b.yaw-a.yaw));
+    left ||= turn < -0.01; right ||= turn > 0.01;
+    sharp ||= Math.abs(turn)>0.055;
+    wide ||= Math.abs(turn)>0.015 && Math.abs(turn)<0.03;
+    straight=Math.abs(turn)<0.001?straight+1:0;longest=Math.max(longest,straight);
+  }
+  assert.ok(left && right && sharp && wide);assert.ok(longest>=60);
+});
 test("track is continuous and nearest recovers distance", () => {
   for (let s = 0; s < LENGTH; s += 0.7) {
     const p = point(s);

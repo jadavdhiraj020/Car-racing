@@ -15,7 +15,7 @@ export function createScene(canvas) {
     stencil: false,
     preserveDrawingBuffer: true,
   });
-  engine.setHardwareScalingLevel(Math.max(1, devicePixelRatio / 1.5));
+  engine.setHardwareScalingLevel(1.5);
   const scene = new Scene(engine);
   scene.clearColor = new Color4(0.64, 0.79, 0.74, 1);
   scene.fogMode = Scene.FOGMODE_EXP2;
@@ -336,10 +336,7 @@ export function createScene(canvas) {
   window.addEventListener("resize", () => engine.resize());
   return {
     update,
-    quality: (low) =>
-      engine.setHardwareScalingLevel(
-        low ? 2 : Math.max(1, devicePixelRatio / 1.5),
-      ),
+    quality: (level) => engine.setHardwareScalingLevel([2, 1.5, 1][level]),
     scene,
   };
 }

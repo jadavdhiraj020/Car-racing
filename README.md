@@ -8,7 +8,7 @@ A complete friends-only racing project: Babylon.js graphics, an authoritative No
 
 | Part | Choice | Purpose |
 |---|---|---|
-| 3D | Babylon.js 8 | Procedural cars, stadium track, palm trees, follow camera |
+| 3D | Babylon.js 8 | Procedural cars, chicane circuit, palm trees, follow camera |
 | Physics | cannon-es 0.20 (MIT) | Server-side gravity, ground and barrier collisions |
 | Multiplayer | Socket.IO 4 | 30 input packets/second, 20 room snapshots/second |
 | Server | Node.js 24, Express 5 | Serves the website and runs each race |
@@ -115,7 +115,7 @@ Screenshots are written to `test-artifacts/`. Chrome automation uses a temporary
 5. Click the game area if needed. Hold W to accelerate; use A/D to steer. In the other window watch the first car move. Use R if stuck. If a window loses focus, controls release automatically.
 6. Follow the loop and glowing gate posts for three laps. Each finish registers on the server. After both finish (or the timeout), the host clicks **RUN IT BACK ↻**, then starts again.
 
-Controls: W/Up accelerate; S/Down brake then reverse; A/Left and D/Right steer; Space drift; R reset. Touch buttons appear on devices with coarse pointers. Sound is opt-in using **SOUND OFF**; it enables synthesized engine and countdown/results tones. Low quality reduces render resolution. No downloaded music or models.
+Controls: W/Up accelerate; S/Down brake then reverse; A/Left and D/Right steer; Space drift; R reset. Touch buttons appear on devices with coarse pointers. Sound is opt-in using **SOUND OFF**; it enables synthesized engine and countdown/results tones. Graphics defaults to Medium; the quality button cycles through High, Low, and Medium, changing render resolution. No downloaded music or models.
 
 Testing over your home Wi-Fi requires the PC's LAN address, not localhost. Run `ipconfig`, find the active Wi-Fi adapter's IPv4 address, and open `http://THAT-ADDRESS:3000` on the other device. If Windows asks, allow Node on your trusted private network. The easiest test between different homes is the deployed HTTPS URL below; do not forward router ports.
 
@@ -245,7 +245,7 @@ No public URL exists yet. Render will assign one like `https://apex-friends-raci
 | Works locally but not online | Wrong root/build/start/port | Use the exact Render table above, root blank, `npm ci --include=dev && npm run build`, `npm start`; app must keep supplied PORT behavior. |
 | HTTPS/WSS or mixed-content error | Hardcoded HTTP server | Restore same-origin `io()`. Use Render's HTTPS URL. Rebuild/redeploy. |
 | Blank 3D screen | WebGL disabled or outdated driver/browser | In Chrome Settings → System enable graphics acceleration, relaunch Chrome, update graphics driver; try Edge. Verify `/health` and reload Ctrl+F5. |
-| Low frame rate | High pixel density, weak GPU or software rendering | Click **QUALITY HIGH** to switch to Low; close extra 3D browser windows; enable hardware acceleration. |
+| Low frame rate | High pixel density, weak GPU or software rendering | Click the quality button until it reads **QUALITY LOW**; close extra 3D browser windows; enable hardware acceleration. |
 | Car falls through road | Modified ground/physics code | Original track has a ground plane. Press R. Restore `server/race.js` ground setup and flat track; server auto-resets out-of-bounds cars. |
 | Car stuck at barrier | Steering into wall | Brake/reverse with S or press R (2-second reset cooldown). |
 | Remote cars not moving | Race not started, connection lost, input window unfocused | Wait for GO; focus the driving window; verify ONLINE indicator and `/health`. Disconnected players must rejoin the next lobby. |
