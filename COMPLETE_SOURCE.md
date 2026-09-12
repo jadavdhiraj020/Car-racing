@@ -1,12 +1,12 @@
 # Complete APEX source code
 
-All project source/configuration files are also present separately in this workspace. Generated dependencies, build output, screenshots and Git metadata are excluded.
+All source and configuration files, including the lockfile. Generated files and this listing itself are excluded.
 
 ## .gitignore
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/.gitignore`
 
-````text
+````
 node_modules/
 dist/
 .env
@@ -20,7 +20,7 @@ release/
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/.github/workflows/ci.yml`
 
-````text
+````
 name: Check racing game
 on: [push, pull_request]
 jobs:
@@ -42,7 +42,7 @@ jobs:
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/package.json`
 
-````json
+````
 {
   "name": "apex-friends-racing",
   "version": "1.0.0",
@@ -79,7 +79,7 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/package.json`
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/package-lock.json`
 
-````json
+````
 {
   "name": "apex-friends-racing",
   "version": "1.0.0",
@@ -2493,7 +2493,7 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/package-lock.json`
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/vite.config.js`
 
-````javascript
+````
 import { defineConfig } from "vite";
 export default defineConfig({
   root: "client",
@@ -2507,7 +2507,7 @@ export default defineConfig({
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/render.yaml`
 
-````text
+````
 services:
   - type: web
     name: apex-friends-racing
@@ -2528,7 +2528,7 @@ services:
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/index.html`
 
-````html
+````
 <!doctype html>
 <html lang="en">
   <head>
@@ -2647,7 +2647,7 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/index.html`
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/src/style.css`
 
-````css
+````
 @import url("https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap");
 :root {
   font-family: "DM Sans", sans-serif;
@@ -3200,7 +3200,7 @@ footer,
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/src/scene.js`
 
-````javascript
+````
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { Scene } from "@babylonjs/core/scene";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -3553,7 +3553,7 @@ export function createScene(canvas) {
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/src/main.js`
 
-````javascript
+````
 import "./style.css";
 import { io } from "socket.io-client";
 import { createScene } from "./scene.js";
@@ -3889,7 +3889,7 @@ frame();
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/shared/track.js`
 
-````javascript
+````
 export const TRACK = {
   name: "Palm Circuit",
   width: 18,
@@ -3945,7 +3945,7 @@ export const gates = Array.from({ length: 24 }, (_, i) =>
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/server/race.js`
 
-````javascript
+````
 import * as C from "cannon-es";
 import { TRACK, LENGTH, point, nearest, gates } from "../shared/track.js";
 export class Race {
@@ -4108,7 +4108,7 @@ export class Race {
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/server/index.js`
 
-````javascript
+````
 import express from "express";
 import { createServer } from "node:http";
 import { randomInt } from "node:crypto";
@@ -4313,7 +4313,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/test/race.test.js`
 
-````javascript
+````
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { io } from "socket.io-client";
@@ -4545,7 +4545,7 @@ test("six-player cap, spoof resistance, real disconnect host transfer and finish
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/scripts/browser-check.mjs`
 
-````javascript
+````
 import { chromium } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import assert from "node:assert/strict";
@@ -4637,7 +4637,7 @@ try {
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/LICENSE`
 
-````text
+````
 MIT License
 
 Copyright (c) 2026 APEX Friends Racing contributors
@@ -4666,7 +4666,7 @@ SOFTWARE.
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/README.md`
 
-````text
+````
 # 🏎️ APEX — 3D Friend Racing Game
 
 A complete friends-only racing project: Babylon.js graphics, an authoritative Node.js/Socket.IO server, Cannon physics, private rooms, 2–6 drivers, 3 laps, results, and rematches. No database, player accounts, paid assets, or API keys.
@@ -4808,6 +4808,17 @@ Simplest: GitHub Desktop.
 4. Click **Publish repository**. Name: `apex-friends-racing`. Keep **Keep this code private** checked. Click **Publish Repository**.
 5. Click **View on GitHub**. You should see `client`, `server`, `package.json`, and `render.yaml`. Do not upload `node_modules` or `dist`.
 
+Windows note for this prepared workspace: the Git folder was created by the sandbox account. If GitHub Desktop offers a repository trust prompt, review this exact project path and accept it. If command-line Git reports **dubious ownership**, add the following command-only option after `git` in each command; it trusts only this project for that invocation and changes no file ownership:
+
+```powershell
+git -c safe.directory='C:/Users/jadav/Coding/car racing game' status
+git -c safe.directory='C:/Users/jadav/Coding/car racing game' branch -M main
+git -c safe.directory='C:/Users/jadav/Coding/car racing game' remote add origin https://github.com/YOUR-USERNAME/apex-friends-racing.git
+git -c safe.directory='C:/Users/jadav/Coding/car racing game' push -u origin main
+```
+
+Use your actual GitHub username. This option was used successfully to create the local commit. No Windows ownership or persistent Git trust settings were changed.
+
 Alternative command-line workflow (do not do both):
 
 1. Open https://github.com/new while signed in.
@@ -4935,7 +4946,7 @@ No local server management is needed after that one-time deployment, subject to 
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/VERIFICATION.md`
 
-````text
+````
 # Verification record
 
 Checked on 2026-09-12, Windows, Node.js 24.19.0.

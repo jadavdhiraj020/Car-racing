@@ -139,6 +139,17 @@ Simplest: GitHub Desktop.
 4. Click **Publish repository**. Name: `apex-friends-racing`. Keep **Keep this code private** checked. Click **Publish Repository**.
 5. Click **View on GitHub**. You should see `client`, `server`, `package.json`, and `render.yaml`. Do not upload `node_modules` or `dist`.
 
+Windows note for this prepared workspace: the Git folder was created by the sandbox account. If GitHub Desktop offers a repository trust prompt, review this exact project path and accept it. If command-line Git reports **dubious ownership**, add the following command-only option after `git` in each command; it trusts only this project for that invocation and changes no file ownership:
+
+```powershell
+git -c safe.directory='C:/Users/jadav/Coding/car racing game' status
+git -c safe.directory='C:/Users/jadav/Coding/car racing game' branch -M main
+git -c safe.directory='C:/Users/jadav/Coding/car racing game' remote add origin https://github.com/YOUR-USERNAME/apex-friends-racing.git
+git -c safe.directory='C:/Users/jadav/Coding/car racing game' push -u origin main
+```
+
+Use your actual GitHub username. This option was used successfully to create the local commit. No Windows ownership or persistent Git trust settings were changed.
+
 Alternative command-line workflow (do not do both):
 
 1. Open https://github.com/new while signed in.
