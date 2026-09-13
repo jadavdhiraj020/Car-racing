@@ -1,7 +1,8 @@
+import { drive } from "../shared/driving.js";
 import * as C from "cannon-es";
 import { TRACK, LENGTH, point, nearest, gates } from "../shared/track.js";
 
-import {CAR_HALF_WIDTH, CAR_HALF_LENGTH, overlap} from "../shared/contact.js";
+import { CAR_HALF_WIDTH, CAR_HALF_LENGTH, overlap } from "../shared/contact.js";
 
 export class Race {
   constructor() {
@@ -29,6 +30,8 @@ export class Race {
         b.quaternion.setFromEuler(0, p.yaw, 0);
         this.world.addBody(b);
       }
+    this.world.broadphase = new C.SAPBroadphase(this.world);
+    this.world.broadphase.axisIndex = 2;
     this.cars = new Map();
   }
   add(id, index) {
@@ -55,8 +58,14 @@ export class Race {
       respawn: 0,
       impact: 0,
     };
-    b.addEventListener("collide", event => {
-      car.impact=Math.max(car.impact,Math.min(1,Math.abs(event.contact.getImpactVelocityAlongNormal())/18));
+    b.addEventListener("collide", (event) => {
+      car.impact = Math.max(
+        car.impact,
+        Math.min(
+          1,
+          Math.abs(event.contact.getImpactVelocityAlongNormal()) / 18,
+        ),
+      );
     });
     this.cars.set(id, car);
     this.world.addBody(b);
@@ -71,15 +80,36 @@ export class Race {
   reset(c, grid = false, index = 0) {
     const s = grid ? -8 - Math.floor(index / 2) * 7 : (c.passed * LENGTH) / 24;
     let p = point(s, grid ? (index % 2 ? 3 : -3) : 0);
-    let free=false;
-    for(let back=0;back<=60&&!free;back+=6){
-      for(const lane of [grid?(index%2?3:-3):0,-4,4,-7,7]){
-        const candidate=point(s-back,lane);
-        if([...this.cars.values()].every(other=>other===c||!overlap(candidate,{x:other.b.position.x,z:other.b.position.z,yaw:other.yaw},0.3))){p=candidate;free=true;break;}
+    let free = false;
+    for (let back = 0; back <= 60 && !free; back += 6) {
+      for (const lane of [grid ? (index % 2 ? 3 : -3) : 0, -4, 4, -7, 7]) {
+        const candidate = point(s - back, lane);
+        if (
+          [...this.cars.values()].every(
+            (other) =>
+              other === c ||
+              !overlap(
+                candidate,
+                {
+                  x: other.b.position.x,
+                  z: other.b.position.z,
+                  yaw: other.yaw,
+                },
+                0.3,
+              ),
+          )
+        ) {
+          p = candidate;
+          free = true;
+          break;
+        }
       }
     }
-    if(!free)return false;
-    c.respawn++;c.steer=0;
+    if (!free) return false;
+    c.respawn++;
+    c.steer = 0;
+    c.input = {};
+    c.inputAt = 0;
     c.b.position.set(p.x, 0.55, p.z);
     c.b.velocity.setZero();
     c.b.angularVelocity.setZero();
@@ -97,52 +127,20 @@ export class Race {
         c.resetAt = now;
       }
       c.impact = (c.impact || 0) * Math.exp(-12 * dt);
-      const f = { x: Math.sin(c.yaw), z: Math.cos(c.yaw) },
-        v = c.b.velocity;
-      let speed = v.x * f.x + v.z * f.z;
-      const lateral = v.x * f.z - v.z * f.x;
-
-      // Smooth, progressive steering response: snappy turn-in with zero twitch
-      const targetSteer = (input.left ? -1 : 0) + (input.right ? 1 : 0);
-      c.steer += (targetSteer - c.steer) * (1 - Math.exp(-28 * dt));
-
-      // Acceleration and Braking with dynamic power delivery
-      if (input.up) {
-        const punch = 28 - Math.max(0, speed / 50) * 11.5;
-        speed += punch * dt;
-      } else if (input.down) {
-        if (speed > 1) speed -= 38 * dt; // Decisive braking
-        else speed -= 18 * dt; // Smooth reverse
-      } else {
-        speed *= Math.exp(-0.45 * dt); // Natural rolling drag
-      }
-
-      // Aerodynamic drag and speed clamping
-      speed *= Math.exp(-(input.drift ? 0.55 : 0.18) * dt);
-      speed = Math.max(-12, Math.min(50, speed));
-      if (!running || c.finished) speed *= Math.exp(-8 * dt);
-
-      // Speed-sensitive steering with weight transfer dynamics
-      const accelRate = (input.up ? 1 : 0) - (input.down ? 1 : 0);
-      const weightTransfer = Math.max(-0.2, Math.min(0.3, -accelRate * 0.15));
-      const frontGrip = 1.0 + weightTransfer;
-      const speedFactor = Math.max(0.32, Math.min(Math.abs(speed) / 7.5, 1));
-      const stability = 1 / (1 + Math.max(0, Math.abs(speed) - 16) / 54);
-      const turnAuthority = input.drift ? 2.22 : 1.5 * stability * frontGrip;
-      c.yaw += c.steer * Math.sign(speed || 1) * speedFactor * turnAuthority * dt;
-
-      // Lateral tire grip / controlled drift slip
-      const slipDamping = input.drift ? 2.2 : 11.5;
-      const slip = lateral * Math.exp(-slipDamping * dt);
-
-      // Off-road grass friction (slight drag outside the asphalt road)
-      const distFromCenter = nearest(c.b.position.x, c.b.position.z).distance;
-      if (distFromCenter > TRACK.width / 2) {
-        speed *= Math.exp(-1.4 * dt);
-      }
-
-      v.x = Math.sin(c.yaw) * speed + Math.cos(c.yaw) * slip;
-      v.z = Math.cos(c.yaw) * speed - Math.sin(c.yaw) * slip;
+      const motion = {
+        x: c.b.position.x,
+        z: c.b.position.z,
+        yaw: c.yaw,
+        steer: c.steer,
+        vx: c.b.velocity.x,
+        vz: c.b.velocity.z,
+      };
+      drive(motion, input, dt, running && !c.finished);
+      c.yaw = motion.yaw;
+      c.steer = motion.steer;
+      c.b.velocity.x = motion.vx;
+      c.b.velocity.z = motion.vz;
+      c.ack = c.inputSeq || 0;
       c.b.quaternion.setFromEuler(0, c.yaw, 0);
       c.previous = { x: c.b.position.x, z: c.b.position.z };
     }
@@ -152,14 +150,18 @@ export class Race {
 
     // Multi-pass contact resolution: prevents overlap and exchanges physical impulse
     const bodies = [...this.cars.values()];
-    for (let pass = 0; pass < 6; pass++) {
+    const frames = new Map(
+      bodies.map((c) => [c, point(nearest(c.b.position.x, c.b.position.z).s)]),
+    );
+    for (let pass = 0; pass < 12; pass++) {
       for (let i = 0; i < bodies.length; i++) {
         for (let j = i + 1; j < bodies.length; j++) {
-          const a = bodies[i], b = bodies[j];
+          const a = bodies[i],
+            b = bodies[j];
           const hit = overlap(
             { x: a.b.position.x, z: a.b.position.z, yaw: a.yaw },
             { x: b.b.position.x, z: b.b.position.z, yaw: b.yaw },
-            0.02
+            0.02,
           );
           if (!hit) continue;
           const correction = (hit.depth + 0.002) * 0.5;
@@ -169,23 +171,54 @@ export class Race {
           b.b.position.z += hit.z * correction;
           a.b.aabbNeedsUpdate = b.b.aabbNeedsUpdate = true;
 
-          const closing = (b.b.velocity.x - a.b.velocity.x) * hit.x + (b.b.velocity.z - a.b.velocity.z) * hit.z;
+          const closing =
+            (b.b.velocity.x - a.b.velocity.x) * hit.x +
+            (b.b.velocity.z - a.b.velocity.z) * hit.z;
           if (closing < 0) {
             const impulse = -closing * 0.6;
             a.b.velocity.x -= hit.x * impulse;
             a.b.velocity.z -= hit.z * impulse;
             b.b.velocity.x += hit.x * impulse;
             b.b.velocity.z += hit.z * impulse;
-            const impactMag = Math.min(1, Math.abs(closing) / 10 + hit.depth * 1.5);
+            const impactMag = Math.min(
+              1,
+              Math.abs(closing) / 10 + hit.depth * 1.5,
+            );
             a.impact = Math.max(a.impact, impactMag);
             b.impact = Math.max(b.impact, impactMag);
           }
         }
       }
+      // Project against the road edge as part of the same contact solve, so a pile-up cannot push a car through a barrier.
+      for (const c of bodies) {
+        const frame = frames.get(c),
+          nx = Math.cos(frame.yaw),
+          nz = -Math.sin(frame.yaw);
+        const offset =
+          (c.b.position.x - frame.x) * nx + (c.b.position.z - frame.z) * nz;
+        const relative = c.yaw - frame.yaw;
+        const extent =
+          CAR_HALF_WIDTH * Math.abs(Math.cos(relative)) +
+          CAR_HALF_LENGTH * Math.abs(Math.sin(relative));
+        const limit = TRACK.width / 2 - extent - 0.025;
+        if (Math.abs(offset) > limit) {
+          const excess = offset - Math.sign(offset) * limit;
+          c.b.position.x -= nx * excess;
+          c.b.position.z -= nz * excess;
+          c.b.aabbNeedsUpdate = true;
+          const outward =
+            (c.b.velocity.x * nx + c.b.velocity.z * nz) * Math.sign(offset);
+          if (outward > 0) {
+            c.impact = Math.max(c.impact, Math.min(1, outward / 18));
+            c.b.velocity.x -= nx * outward * Math.sign(offset);
+            c.b.velocity.z -= nz * outward * Math.sign(offset);
+          }
+        }
+      }
     }
     for (const c of this.cars.values()) {
-      if (running && !c.finished) this.progress(c, now, startAt);
-      c.impact *= Math.exp(-6*dt);
+      if (running && !c.finished) this.progress(c, now, startAt, dt);
+      c.impact *= Math.exp(-6 * dt);
       if (
         c.b.position.y < -5 ||
         nearest(c.b.position.x, c.b.position.z).distance > 45
@@ -193,7 +226,7 @@ export class Race {
         this.reset(c);
     }
   }
-  progress(c, now, startAt) {
+  progress(c, now, startAt, dt = 0) {
     const next = (c.passed + 1) % 24,
       g = gates[next],
       p = c.b.position,
@@ -206,12 +239,17 @@ export class Race {
     );
     if (before <= 0 && after > 0 && across < TRACK.width / 2 + 2) {
       c.passed++;
-      if (c.passed === 24 * TRACK.laps) c.finished = now - startAt;
+      if (c.passed === 24 * TRACK.laps)
+        c.finished = Math.max(
+          0.001,
+          now - startAt - dt * 1000 * (1 - -before / (after - before)),
+        );
     }
   }
   snapshot() {
     return [...this.cars.values()].map((c) => ({
       id: c.id,
+      ack: c.ack || 0,
       x: c.b.position.x,
       y: c.b.position.y,
       z: c.b.position.z,

@@ -1,3 +1,5 @@
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { predict } from "../../shared/driving.js";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { Scene } from "@babylonjs/core/scene";
 import { Vector3, Matrix } from "@babylonjs/core/Maths/math.vector";
@@ -11,15 +13,15 @@ import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
-import { TRACK, LENGTH, point, gates } from "../../shared/track.js";
+import { TRACK, LENGTH, point, gates, nearest } from "../../shared/track.js";
 
-import {PBRMaterial} from "@babylonjs/core/Materials/PBR/pbrMaterial";
-import {RawCubeTexture} from "@babylonjs/core/Materials/Textures/rawCubeTexture";
-import {overlap} from "../../shared/contact.js";
+import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
+import { RawCubeTexture } from "@babylonjs/core/Materials/Textures/rawCubeTexture";
+import { overlap } from "../../shared/contact.js";
 export function createScene(canvas, audioSystem = null) {
   const engine = new Engine(canvas, true, {
     stencil: false,
-    preserveDrawingBuffer: true,
+    preserveDrawingBuffer: false,
   });
   engine.setHardwareScalingLevel(1.5);
 
@@ -67,22 +69,46 @@ export function createScene(canvas, audioSystem = null) {
   }
 
   // A small, generated studio/sky cubemap gives paint and glass real view-dependent reflections.
-  const faces=Array.from({length:6},(_,face)=>{
-    const data=new Uint8Array(64*64*4);
-    for(let y=0;y<64;y++)for(let x=0;x<64;x++){
-      const sky=face===2?1:face===3?0:1-y/63;
-      const highlight=Math.exp(-((x-40)**2/75+(y-20)**2/12))*.7;
-      const i=(y*64+x)*4;
-      data[i]=Math.min(255,45+sky*115+highlight*100);data[i+1]=Math.min(255,60+sky*130+highlight*100);data[i+2]=Math.min(255,62+sky*150+highlight*100);data[i+3]=255;
-    }return data;
+  const faces = Array.from({ length: 6 }, (_, face) => {
+    const data = new Uint8Array(64 * 64 * 4);
+    for (let y = 0; y < 64; y++)
+      for (let x = 0; x < 64; x++) {
+        const sky = face === 2 ? 1 : face === 3 ? 0 : 1 - y / 63;
+        const highlight =
+          Math.exp(-((x - 40) ** 2 / 75 + (y - 20) ** 2 / 12)) * 0.7;
+        const i = (y * 64 + x) * 4;
+        data[i] = Math.min(255, 45 + sky * 115 + highlight * 100);
+        data[i + 1] = Math.min(255, 60 + sky * 130 + highlight * 100);
+        data[i + 2] = Math.min(255, 62 + sky * 150 + highlight * 100);
+        data[i + 3] = 255;
+      }
+    return data;
   });
-  const environment=new RawCubeTexture(scene,faces,64,5,0,true,false,3);
-  environment.coordinatesMode=3;
-  function finish(name,color,metallic=.6,roughness=.22){
-    const m=new PBRMaterial(name,scene);m.albedoColor=Color3.FromHexString(color);m.metallic=metallic;m.roughness=roughness;m.reflectionTexture=environment;m.environmentIntensity=.75;m.clearCoat.isEnabled=true;m.clearCoat.intensity=1;m.clearCoat.roughness=.12;return m;
+  const environment = new RawCubeTexture(
+    scene,
+    faces,
+    64,
+    5,
+    0,
+    true,
+    false,
+    3,
+  );
+  environment.coordinatesMode = 3;
+  function finish(name, color, metallic = 0.6, roughness = 0.22) {
+    const m = new PBRMaterial(name, scene);
+    m.albedoColor = Color3.FromHexString(color);
+    m.metallic = metallic;
+    m.roughness = roughness;
+    m.reflectionTexture = environment;
+    m.environmentIntensity = 0.75;
+    m.clearCoat.isEnabled = true;
+    m.clearCoat.intensity = 1;
+    m.clearCoat.roughness = 0.12;
+    return m;
   }
-  const chrome=finish("forged alloys","#b7c4c8",.85,.18);
-  const carbon=finish("carbon aero","#111a20",.25,.4);
+  const chrome = finish("forged alloys", "#b7c4c8", 0.85, 0.18);
+  const carbon = finish("carbon aero", "#111a20", 0.25, 0.4);
   // Material definitions
   const grass = material("fairway grass", "#3c6b4e", 0.05),
     sand = material("coastal sand", "#c8b082", 0.08),
@@ -165,11 +191,17 @@ export function createScene(canvas, audioSystem = null) {
 
       const pNextCurb = point((i + 1) * segLen, curbDist);
       const pCurrCurb = point(i * segLen, curbDist);
-      const curbLength = Math.hypot(pNextCurb.x - pCurrCurb.x, pNextCurb.z - pCurrCurb.z);
+      const curbLength = Math.hypot(
+        pNextCurb.x - pCurrCurb.x,
+        pNextCurb.z - pCurrCurb.z,
+      );
 
       const pNextWall = point((i + 1) * segLen, wallDist);
       const pCurrWall = point(i * segLen, wallDist);
-      const wallLength = Math.hypot(pNextWall.x - pCurrWall.x, pNextWall.z - pCurrWall.z);
+      const wallLength = Math.hypot(
+        pNextWall.x - pCurrWall.x,
+        pNextWall.z - pCurrWall.z,
+      );
 
       // Red/white apex rumble strips
       box(
@@ -199,7 +231,17 @@ export function createScene(canvas, audioSystem = null) {
     }
 
     if (i % 2 === 0) {
-      box("center stripe", 0.2, 0.03, segLen * 0.6, p.x, 0.1, p.z, cream, p.yaw);
+      box(
+        "center stripe",
+        0.2,
+        0.03,
+        segLen * 0.6,
+        p.x,
+        0.1,
+        p.z,
+        cream,
+        p.yaw,
+      );
     }
   }
 
@@ -232,7 +274,17 @@ export function createScene(canvas, audioSystem = null) {
     // Dark burnout tire marks behind each starting slot
     for (const side of [-0.68, 0.68]) {
       const pBurn = point(slotS - 2.8, slotOffset + side);
-      box("burnout mark", 0.34, 0.02, 3.4, pBurn.x, 0.09, pBurn.z, dark, pBurn.yaw);
+      box(
+        "burnout mark",
+        0.34,
+        0.02,
+        3.4,
+        pBurn.x,
+        0.09,
+        pBurn.z,
+        dark,
+        pBurn.yaw,
+      );
     }
   }
 
@@ -278,7 +330,11 @@ export function createScene(canvas, audioSystem = null) {
   for (let i = 0; i < 5; i++) {
     const lx = startP.x + (i - 2) * 2.2;
     box("gantry housing " + i, 1.3, 1.8, 0.45, lx, 7.3, startP.z - 0.65, dark);
-    const bulb = MeshBuilder.CreateCylinder("gantry bulb " + i, { diameter: 0.76, height: 0.14, tessellation: 16 }, scene);
+    const bulb = MeshBuilder.CreateCylinder(
+      "gantry bulb " + i,
+      { diameter: 0.76, height: 0.14, tessellation: 16 },
+      scene,
+    );
     bulb.rotation.x = Math.PI / 2;
     bulb.position.set(lx, 7.3, startP.z - 0.88);
     bulb.material = gantryOffMat;
@@ -297,15 +353,31 @@ export function createScene(canvas, audioSystem = null) {
   });
 
   // Reusable arrow texture for all directional markers
-  const arrowTex = new DynamicTexture("arrowTex", { width: 128, height: 128 }, scene);
-  arrowTex.drawText("↑", null, 95, "bold 95px sans-serif", "#d6fc71", "#12251d", true);
+  const arrowTex = new DynamicTexture(
+    "arrowTex",
+    { width: 128, height: 128 },
+    scene,
+  );
+  arrowTex.drawText(
+    "↑",
+    null,
+    95,
+    "bold 95px sans-serif",
+    "#d6fc71",
+    "#12251d",
+    true,
+  );
   const arrowMat = material("arrowMat", "#ffffff");
   arrowMat.diffuseTexture = arrowTex;
   arrowMat.emissiveColor = new Color3(0.3, 0.35, 0.25);
 
   for (let i = 0; i < 16; i++) {
     const p = point((i * LENGTH) / 16 + 25);
-    const arrow = MeshBuilder.CreatePlane("arrow", { width: 2.4, height: 3.6, sideOrientation: 2 }, scene);
+    const arrow = MeshBuilder.CreatePlane(
+      "arrow",
+      { width: 2.4, height: 3.6, sideOrientation: 2 },
+      scene,
+    );
     arrow.position.set(p.x, 0.16, p.z);
     arrow.rotation.y = p.yaw;
     arrow.rotation.x = Math.PI / 2;
@@ -335,19 +407,27 @@ export function createScene(canvas, audioSystem = null) {
   }
 
   // Base palm tree prototype for GPU instancing
-  const baseTrunk = MeshBuilder.CreateCylinder("baseTrunk", {
-    height: 7.5,
-    diameterTop: 0.35,
-    diameterBottom: 0.65,
-    tessellation: 7,
-  }, scene);
+  const baseTrunk = MeshBuilder.CreateCylinder(
+    "baseTrunk",
+    {
+      height: 7.5,
+      diameterTop: 0.35,
+      diameterBottom: 0.65,
+      tessellation: 7,
+    },
+    scene,
+  );
   baseTrunk.position.y = -100;
   baseTrunk.material = bark;
   baseTrunk.isVisible = false;
 
   const baseFronds = [];
   for (let a = 0; a < 5; a++) {
-    const frond = MeshBuilder.CreateSphere("baseFrond", { diameter: 1, segments: 4 }, scene);
+    const frond = MeshBuilder.CreateSphere(
+      "baseFrond",
+      { diameter: 1, segments: 4 },
+      scene,
+    );
     frond.scaling.set(1.4, 0.35, 5.0);
     frond.rotation.y = (a * Math.PI * 2) / 5;
     frond.position.y = -100;
@@ -363,7 +443,9 @@ export function createScene(canvas, audioSystem = null) {
     if (shadowGen) shadowGen.addShadowCaster(trunkInst);
 
     for (let i = 0; i < baseFronds.length; i++) {
-      const frondInst = baseFronds[i].createInstance("frond_" + x + "_" + z + "_" + i);
+      const frondInst = baseFronds[i].createInstance(
+        "frond_" + x + "_" + z + "_" + i,
+      );
       frondInst.position.set(
         x + Math.sin(baseFronds[i].rotation.y) * 1.8 * scale,
         7.5 * scale,
@@ -404,18 +486,59 @@ export function createScene(canvas, audioSystem = null) {
     );
   }
 
+  // Batch immobile scenery by material: a circuit needs few draw calls, not one per curb.
+  const batches = new Map();
+  for (const mesh of [...scene.meshes]) {
+    if (
+      mesh.parent ||
+      mesh.isAnInstance ||
+      mesh.instances?.length ||
+      !mesh.isVisible ||
+      !mesh.material ||
+      gantryBulbs.includes(mesh)
+    )
+      continue;
+    const list = batches.get(mesh.material) || [];
+    list.push(mesh);
+    batches.set(mesh.material, list);
+  }
+  for (const [mat, meshes] of batches) {
+    if (meshes.length < 2) continue;
+    const merged = Mesh.MergeMeshes(
+      meshes,
+      true,
+      true,
+      undefined,
+      false,
+      false,
+    );
+    if (merged) {
+      merged.material = mat;
+      merged.receiveShadows = true;
+      merged.freezeWorldMatrix();
+    }
+  }
+  if (shadowGen) {
+    const map = shadowGen.getShadowMap();
+    map.renderList = map.renderList.filter((mesh) => !mesh.isDisposed());
+  }
   const cars = new Map();
 
   // High-performance soft tire smoke pool
   const smokeMaterial = material("tire haze", "#d0d4cc", 0);
   smokeMaterial.alpha = 0.24;
   const smoke = Array.from({ length: 40 }, () => {
-    const mesh = MeshBuilder.CreateSphere("tire smoke", { diameter: 1, segments: 4 }, scene);
+    const mesh = MeshBuilder.CreateSphere(
+      "tire smoke",
+      { diameter: 1, segments: 4 },
+      scene,
+    );
     mesh.material = smokeMaterial;
     mesh.setEnabled(false);
     return { mesh, life: 0 };
   });
-  let smokeCursor = 0, smokeClock = 0;
+  let smokeCursor = 0,
+    smokeClock = 0;
 
   // Dynamic metallic collision/kerb spark particle pool
   const sparkMaterial = material("spark", "#ffc83b", 0.9, "#ff8800");
@@ -457,13 +580,17 @@ export function createScene(canvas, audioSystem = null) {
       chassis = new TransformNode(player.id + "_chassis", scene);
     chassis.parent = root;
 
-    const paint = finish(player.id, player.color, 0.72, 0.16);
+    const paint = finish(player.id, player.color, 0.42, 0.22);
     const helmetPaint = finish("helmet_" + player.id, player.color, 0.55, 0.22);
 
     // Soft contact shadow disc grounded directly beneath car
-    const shadowDisc = MeshBuilder.CreateDisc("contactShadow_" + player.id, { radius: 1.58, tessellation: 18 }, scene);
+    const shadowDisc = MeshBuilder.CreateDisc(
+      "contactShadow_" + player.id,
+      { radius: 1.58, tessellation: 18 },
+      scene,
+    );
     shadowDisc.rotation.x = Math.PI / 2;
-    shadowDisc.position.set(0, 0.024, 0);
+    shadowDisc.position.set(0, -0.34, 0);
     shadowDisc.scaling.set(0.72, 1.35, 1);
     shadowDisc.parent = root;
     const shadowMat = material("contactShadowMat_" + player.id, "#080c0d", 0);
@@ -471,36 +598,92 @@ export function createScene(canvas, audioSystem = null) {
     shadowDisc.material = shadowMat;
 
     // High-contrast racing livery stripe and race number plate
-    const isLightColor = ["#ffffff", "#d6fc71", "#e6ffa8"].includes(player.color.toLowerCase());
-    const liveryStripeMat = finish("stripe_" + player.id, isLightColor ? "#141c22" : "#ffffff", 0.8, 0.2);
-    box("livery stripe nose", 0.22, 0.02, 1.3, 0, 0.42, 1.15, liveryStripeMat, 0, chassis);
-    box("livery stripe spine", 0.2, 0.02, 1.1, 0, 0.72, -0.72, liveryStripeMat, 0, chassis);
+    const isLightColor = ["#ffffff", "#d6fc71", "#e6ffa8"].includes(
+      player.color.toLowerCase(),
+    );
+    const liveryStripeMat = finish(
+      "stripe_" + player.id,
+      isLightColor ? "#141c22" : "#ffffff",
+      0.8,
+      0.2,
+    );
+    box(
+      "livery stripe nose",
+      0.22,
+      0.02,
+      1.3,
+      0,
+      0.42,
+      1.15,
+      liveryStripeMat,
+      0,
+      chassis,
+    );
+    box(
+      "livery stripe spine",
+      0.2,
+      0.02,
+      1.1,
+      0,
+      0.72,
+      -0.72,
+      liveryStripeMat,
+      0,
+      chassis,
+    );
 
-    const numPlateTex = new DynamicTexture("numTex_" + player.id, { width: 128, height: 128 }, scene);
-    const numVal = ((parseInt(player.id.replace(/\D/g, ""), 10) || 1) % 89) + 11;
-    numPlateTex.drawText(String(numVal), null, 88, "bold 78px sans-serif", "#ffffff", player.color, true);
+    const numPlateTex = new DynamicTexture(
+      "numTex_" + player.id,
+      { width: 128, height: 128 },
+      scene,
+    );
+    const numVal =
+      ((parseInt(player.id.replace(/\D/g, ""), 10) || 1) % 89) + 11;
+    numPlateTex.drawText(
+      String(numVal),
+      null,
+      88,
+      "bold 78px sans-serif",
+      "#ffffff",
+      player.color,
+      true,
+    );
     const numMat = material("numMat_" + player.id, "#ffffff");
     numMat.diffuseTexture = numPlateTex;
     numMat.emissiveColor = new Color3(0.4, 0.4, 0.4);
-    const nosePlate = MeshBuilder.CreatePlane("nosePlate_" + player.id, { width: 0.38, height: 0.38 }, scene);
+    const nosePlate = MeshBuilder.CreatePlane(
+      "nosePlate_" + player.id,
+      { width: 0.38, height: 0.38 },
+      scene,
+    );
     nosePlate.position.set(0, 0.39, 1.35);
     nosePlate.rotation.x = Math.PI / 2 - 0.25;
     nosePlate.material = numMat;
     nosePlate.parent = chassis;
 
     // Forward headlight projection beams
-    const beamMat = material("headlightBeamMat_" + player.id, "#ffffff", 0, "#e8ffb0");
+    const beamMat = material(
+      "headlightBeamMat_" + player.id,
+      "#ffffff",
+      0,
+      "#e8ffb0",
+    );
     beamMat.alpha = 0.12;
     for (const x of [-0.72, 0.72]) {
-      const beam = MeshBuilder.CreateCylinder("beam_" + x, {
-        height: 6.2,
-        diameterTop: 0.28,
-        diameterBottom: 2.2,
-        tessellation: 12,
-      }, scene);
+      const beam = MeshBuilder.CreateCylinder(
+        "beam_" + x,
+        {
+          height: 6.2,
+          diameterTop: 0.28,
+          diameterBottom: 2.2,
+          tessellation: 12,
+        },
+        scene,
+      );
       beam.rotation.x = Math.PI / 2 + 0.03;
       beam.position.set(x, 0.25, 4.0);
       beam.material = beamMat;
+      beam.setEnabled(false);
       beam.parent = chassis;
     }
 
@@ -525,45 +708,94 @@ export function createScene(canvas, audioSystem = null) {
     }
 
     // 1. Aerodynamic sculpted monocoque chassis
-    const body = shell("monocoque", [
-      [-2.12, 0.88, 0.03, 0.42],
-      [-1.45, 1.04, 0.04, 0.63],
-      [-0.55, 1.01, 0.04, 0.65],
-      [0.48, 0.97, 0.04, 0.53],
-      [1.52, 0.93, 0.04, 0.39],
-      [2.08, 0.75, 0.09, 0.27],
-    ], paint);
+    const body = shell(
+      "monocoque",
+      [
+        [-2.12, 0.88, 0.03, 0.42],
+        [-1.45, 1.04, 0.04, 0.63],
+        [-0.55, 1.01, 0.04, 0.65],
+        [0.48, 0.97, 0.04, 0.53],
+        [1.52, 0.93, 0.04, 0.39],
+        [2.08, 0.75, 0.09, 0.27],
+      ],
+      paint,
+    );
     if (shadowGen) shadowGen.addShadowCaster(body);
 
     // 2. Front Wing Assembly (multi-tier aerodynamic wing with endplates & canards)
     box("front splitter", 2.36, 0.065, 0.56, 0, 0.05, 2.0, carbon, 0, chassis);
     box("front wing flap", 2.22, 0.038, 0.34, 0, 0.14, 1.94, paint, 0, chassis);
     for (const x of [-1.18, 1.18]) {
-      box("front endplate", 0.05, 0.26, 0.62, x, 0.15, 1.98, carbon, 0, chassis);
-      box("front canard", 0.22, 0.025, 0.18, x - Math.sign(x) * 0.09, 0.23, 1.92, carbon, 0, chassis);
+      box(
+        "front endplate",
+        0.05,
+        0.26,
+        0.62,
+        x,
+        0.15,
+        1.98,
+        carbon,
+        0,
+        chassis,
+      );
+      box(
+        "front canard",
+        0.22,
+        0.025,
+        0.18,
+        x - Math.sign(x) * 0.09,
+        0.23,
+        1.92,
+        carbon,
+        0,
+        chassis,
+      );
     }
     box("nose camera pod", 0.12, 0.09, 0.22, 0, 0.39, 1.62, dark, 0, chassis);
 
     // 3. Cockpit, Driver & F1 Safety Halo
-    box("cockpit tub", 0.84, 0.18, 1.05, 0, 0.46, 0.05, cockpitInterior, 0, chassis);
-    shell("windscreen visor", [
-      [-1.02, 0.65, 0.52, 0.79],
-      [-0.62, 0.65, 0.55, 1.05],
-      [0.18, 0.62, 0.51, 1.02],
-      [0.85, 0.64, 0.44, 0.51],
-    ], glass);
+    box(
+      "cockpit tub",
+      0.84,
+      0.18,
+      1.05,
+      0,
+      0.46,
+      0.05,
+      cockpitInterior,
+      0,
+      chassis,
+    );
+    shell(
+      "windscreen visor",
+      [
+        [-1.02, 0.65, 0.52, 0.79],
+        [-0.62, 0.65, 0.55, 1.05],
+        [0.18, 0.62, 0.51, 1.02],
+        [0.85, 0.64, 0.44, 0.51],
+      ],
+      glass,
+    );
 
     // F1 Safety Halo
     box("halo pillar", 0.055, 0.38, 0.07, 0, 0.72, 0.48, carbon, 0, chassis);
     box("halo arch", 0.78, 0.065, 0.74, 0, 0.91, 0.14, carbon, 0, chassis);
 
     // 3D Driver Helmet inside cockpit
-    const helmet = MeshBuilder.CreateSphere("helmet", { diameter: 0.36, segments: 10 }, scene);
+    const helmet = MeshBuilder.CreateSphere(
+      "helmet",
+      { diameter: 0.36, segments: 10 },
+      scene,
+    );
     helmet.position.set(0, 0.71, 0.08);
     helmet.parent = chassis;
     helmet.material = helmetPaint;
 
-    const helmetVisor = MeshBuilder.CreateBox("helmet visor", { width: 0.26, height: 0.10, depth: 0.16 }, scene);
+    const helmetVisor = MeshBuilder.CreateBox(
+      "helmet visor",
+      { width: 0.26, height: 0.1, depth: 0.16 },
+      scene,
+    );
     helmetVisor.position.set(0, 0.72, 0.21);
     helmetVisor.parent = chassis;
     helmetVisor.material = visorMat;
@@ -575,12 +807,67 @@ export function createScene(canvas, audioSystem = null) {
     // 4. Sidepods, Cooling Inlets & Aero Skirts
     for (const x of [-0.76, 0.76]) {
       box("sidepod body", 0.44, 0.35, 1.4, x, 0.26, 0.12, paint, 0, chassis);
-      box("radiator duct", 0.36, 0.26, 0.08, x, 0.28, 0.82, cockpitInterior, 0, chassis);
+      box(
+        "radiator duct",
+        0.36,
+        0.26,
+        0.08,
+        x,
+        0.28,
+        0.82,
+        cockpitInterior,
+        0,
+        chassis,
+      );
       box("side skirt", 0.08, 0.08, 2.3, x * 1.38, 0.05, 0, carbon, 0, chassis);
-      box("mirror stem", 0.035, 0.16, 0.035, x * 0.92, 0.68, 0.32, carbon, 0, chassis);
-      box("mirror body", 0.18, 0.09, 0.15, x * 1.06, 0.75, 0.32, paint, 0, chassis);
-      box("engine louver", 0.34, 0.02, 0.48, x, 0.62, -0.92, carbon, 0, chassis);
-      box("headlight", 0.38, 0.055, 0.09, x, 0.35, 1.96, headlightGlow, 0, chassis);
+      box(
+        "mirror stem",
+        0.035,
+        0.16,
+        0.035,
+        x * 0.92,
+        0.68,
+        0.32,
+        carbon,
+        0,
+        chassis,
+      );
+      box(
+        "mirror body",
+        0.18,
+        0.09,
+        0.15,
+        x * 1.06,
+        0.75,
+        0.32,
+        paint,
+        0,
+        chassis,
+      );
+      box(
+        "engine louver",
+        0.34,
+        0.02,
+        0.48,
+        x,
+        0.62,
+        -0.92,
+        carbon,
+        0,
+        chassis,
+      );
+      box(
+        "headlight",
+        0.38,
+        0.055,
+        0.09,
+        x,
+        0.35,
+        1.96,
+        headlightGlow,
+        0,
+        chassis,
+      );
     }
 
     // 5. Rear Wing, Diffuser & Dual Exhausts
@@ -588,16 +875,49 @@ export function createScene(canvas, audioSystem = null) {
     box("rear wing flap", 2.24, 0.045, 0.28, 0, 1.15, -1.82, paint, 0, chassis);
     box("drs actuator", 0.12, 0.09, 0.18, 0, 1.12, -1.82, chrome, 0, chassis);
     for (const x of [-1.18, 1.18]) {
-      box("rear endplate", 0.05, 0.52, 0.62, x, 1.02, -1.86, carbon, 0, chassis);
+      box(
+        "rear endplate",
+        0.05,
+        0.52,
+        0.62,
+        x,
+        1.02,
+        -1.86,
+        carbon,
+        0,
+        chassis,
+      );
     }
     for (const x of [-0.42, 0.42]) {
-      box("swan neck pylon", 0.05, 0.52, 0.16, x, 0.81, -1.82, chrome, 0, chassis);
+      box(
+        "swan neck pylon",
+        0.05,
+        0.52,
+        0.16,
+        x,
+        0.81,
+        -1.82,
+        chrome,
+        0,
+        chassis,
+      );
     }
 
     // Underbody diffuser & strakes
     box("rear diffuser", 1.96, 0.11, 0.62, 0, 0.05, -1.98, carbon, 0, chassis);
     for (const x of [-0.58, -0.2, 0.2, 0.58]) {
-      box("diffuser strake", 0.035, 0.15, 0.52, x, 0.08, -1.98, carbon, 0, chassis);
+      box(
+        "diffuser strake",
+        0.035,
+        0.15,
+        0.52,
+        x,
+        0.08,
+        -1.98,
+        carbon,
+        0,
+        chassis,
+      );
     }
 
     // Dual central exhausts
@@ -607,10 +927,34 @@ export function createScene(canvas, audioSystem = null) {
 
     // Flashing rear FIA rain / brake light
     const brakeLights = [
-      box("fia rain light", 0.24, 0.12, 0.05, 0, 0.24, -2.08, taillightGlow, 0, chassis),
+      box(
+        "fia rain light",
+        0.24,
+        0.12,
+        0.05,
+        0,
+        0.24,
+        -2.08,
+        taillightGlow,
+        0,
+        chassis,
+      ),
     ];
     for (const x of [-0.68, 0.68]) {
-      brakeLights.push(box("rear brake led", 0.42, 0.06, 0.05, x, 0.41, -2.06, taillightGlow, 0, chassis));
+      brakeLights.push(
+        box(
+          "rear brake led",
+          0.42,
+          0.06,
+          0.05,
+          x,
+          0.41,
+          -2.06,
+          taillightGlow,
+          0,
+          chassis,
+        ),
+      );
     }
 
     // 6. Forged Alloy Wheels with glowing carbon-ceramic brake discs
@@ -642,7 +986,7 @@ export function createScene(canvas, audioSystem = null) {
           { diameter: 0.64, thickness: 0.03, tessellation: 18 },
           scene,
         );
-        stripe.rotation.y = Math.PI / 2;
+        stripe.rotation.z = Math.PI / 2;
         stripe.position.x = Math.sign(x) * 0.19;
         stripe.parent = axle;
         stripe.material = tireStripe;
@@ -688,16 +1032,59 @@ export function createScene(canvas, audioSystem = null) {
         brakeDiscs.push(disc);
 
         // Racing red Brembo caliper
-        box("caliper", 0.065, 0.18, 0.13, Math.sign(x) * 0.11, 0, 0.18, red, 0, pivot);
+        box(
+          "caliper",
+          0.065,
+          0.18,
+          0.13,
+          Math.sign(x) * 0.11,
+          0,
+          0.18,
+          red,
+          0,
+          pivot,
+        );
 
         wheels.push({ pivot, wheel: axle, front: z > 0 });
       }
     }
 
+    // Batch rigid pieces while keeping wheel axles, suspension and lights animated.
+    for (const parent of [chassis, ...wheels.map((w) => w.wheel)]) {
+      const groups = new Map();
+      for (const mesh of parent.getChildMeshes(true)) {
+        if (
+          !mesh.isEnabled() ||
+          brakeLights.includes(mesh) ||
+          brakeDiscs.includes(mesh)
+        )
+          continue;
+        const group = groups.get(mesh.material) || [];
+        group.push(mesh);
+        groups.set(mesh.material, group);
+      }
+      for (const meshes of groups.values()) {
+        if (meshes.length < 2) continue;
+        const castsShadow = meshes.some((m) =>
+          shadowGen?.getShadowMap()?.renderList.includes(m),
+        );
+        const merged = Mesh.MergeMeshes(meshes, true, true);
+        if (merged) {
+          merged.setParent(parent);
+          if (castsShadow) shadowGen.addShadowCaster(merged);
+        }
+      }
+    }
+    if (shadowGen)
+      shadowGen.getShadowMap().renderList = shadowGen
+        .getShadowMap()
+        .renderList.filter((m) => !m.isDisposed());
+
     // 7. Driver Billboard Label
     const label = document.createElement("div");
     label.className = "driver-label";
-    label.innerHTML = `<span class="driver-tag-pip"></span><span class="driver-tag-name">${player.name}</span>`;
+    label.innerHTML = `<span class="driver-tag-pip"></span><span class="driver-tag-pos"></span><span class="driver-tag-name"></span>`;
+    label.querySelector(".driver-tag-name").textContent = player.name;
     label.style.setProperty("--driver-color", player.color);
     document.body.append(label);
 
@@ -728,7 +1115,10 @@ export function createScene(canvas, audioSystem = null) {
     return result;
   }
 
-  let currentPhase = "",
+  let serverOffset = 0,
+    inputHistory = [],
+    predictionRtt = 0,
+    currentPhase = "",
     localInput = {},
     targets = [],
     me = null,
@@ -762,8 +1152,58 @@ export function createScene(canvas, audioSystem = null) {
         c.root.position.set(t.x, t.y, t.z);
         c.root.rotation.y = t.yaw;
         c.fadeAt = performance.now();
+        c.predBlend = 0;
+        c.recovery = null;
+        c.reconcile = null;
+        c.prediction = null;
       }
-      c.samples.push({ ...t, at: performance.now() });
+      const at =
+        performance.now() +
+        ((state.serverNow || Date.now()) - (Date.now() + serverOffset));
+      if (t.id === id) {
+        const motion = { ...t };
+        const horizon = Math.max(
+          0,
+          Math.min(0.12, (Date.now() + serverOffset - state.serverNow) / 1000),
+        );
+        for (let elapsed = 0; elapsed < horizon; elapsed += 1 / 60) {
+          const sampleAt = performance.now() - horizon * 1000 + elapsed * 1000;
+          const acknowledged = inputHistory.find((p) => p.seq === t.ack)?.input;
+          const command = inputHistory.findLast(
+            (p) => p.seq > t.ack && p.at <= sampleAt,
+          )?.input ||
+            acknowledged || {
+              up: t.throttle,
+              down: t.braking,
+              left: t.steer < -0.1,
+              right: t.steer > 0.1,
+              drift: t.drift,
+            };
+          predict(motion, command, Math.min(1 / 60, horizon - elapsed));
+        }
+        if (c.prediction && c.predBlend > 0.5) {
+          const age = Math.min(
+            0.05,
+            Math.max(0, (performance.now() - c.predictedAt) / 1000),
+          );
+          const x =
+            c.prediction.x +
+            c.prediction.vx * age +
+            (c.reconcile?.x || 0) -
+            motion.x;
+          const z =
+            c.prediction.z +
+            c.prediction.vz * age +
+            (c.reconcile?.z || 0) -
+            motion.z;
+          c.reconcile = Math.hypot(x, z) < 3 ? { x, z } : null;
+        }
+        c.prediction = motion;
+        c.predictedAt = performance.now();
+      }
+      if (c.samples.length && at - c.samples.at(-1).at > 250)
+        c.recovery = { x: c.root.position.x - t.x, z: c.root.position.z - t.z };
+      c.samples.push({ ...t, at });
       if (c.samples.length > 12) c.samples.shift();
       c.target = t;
     }
@@ -771,7 +1211,7 @@ export function createScene(canvas, audioSystem = null) {
 
     // Synchronized 3D Start Gantry Lights
     if (state.phase === "countdown") {
-      const elapsed = Date.now() - state.startAt;
+      const elapsed = Date.now() + serverOffset - state.startAt;
       let litCount = 1;
       if (elapsed >= -600) litCount = 5;
       else if (elapsed >= -1200) litCount = 4;
@@ -780,7 +1220,10 @@ export function createScene(canvas, audioSystem = null) {
       gantryBulbs.forEach((bulb, i) => {
         bulb.material = i < litCount ? gantryRedMat : gantryOffMat;
       });
-    } else if (state.phase === "racing" && Date.now() - state.startAt < 1200) {
+    } else if (
+      state.phase === "racing" &&
+      Date.now() + serverOffset - state.startAt < 1200
+    ) {
       gantryBulbs.forEach((bulb) => (bulb.material = gantryGreenMat));
     } else {
       gantryBulbs.forEach((bulb) => (bulb.material = gantryOffMat));
@@ -806,7 +1249,8 @@ export function createScene(canvas, audioSystem = null) {
       const c = cars.get(carTarget.id);
       const p = state.players.find((pl) => pl.id === carTarget.id);
       if (c && p) {
-        c.label.innerHTML = `<span class="driver-tag-pip"></span><span class="driver-tag-pos">P${i + 1}</span><span class="driver-tag-name">${p.name}</span>`;
+        c.label.querySelector(".driver-tag-pos").textContent = `P${i + 1}`;
+        c.label.querySelector(".driver-tag-name").textContent = p.name;
       }
     }
   }
@@ -853,7 +1297,8 @@ export function createScene(canvas, audioSystem = null) {
       const alpha = 1 - Math.exp(-22 * dt);
 
       // Interpolation timeline
-      const renderAt = now - 35;
+      const renderAt =
+        now - Math.max(55, Math.min(180, predictionRtt / 2 + 35));
       let left = c.samples[0],
         right = c.samples.at(-1);
       for (let i = 1; i < c.samples.length; i++) {
@@ -883,7 +1328,10 @@ export function createScene(canvas, audioSystem = null) {
       const vz1 = (right.vz ?? 0) * dtSec;
 
       let targetPosX, targetPosZ;
-      if (Math.hypot(vx0, vz0) > 0.01 || Math.hypot(vx1, vz1) > 0.01) {
+      if (
+        !(left.impact > 0.05 || right.impact > 0.05) &&
+        (Math.hypot(vx0, vz0) > 0.01 || Math.hypot(vx1, vz1) > 0.01)
+      ) {
         targetPosX = h00 * left.x + h10 * vx0 + h01 * right.x + h11 * vx1;
         targetPosZ = h00 * left.z + h10 * vz0 + h01 * right.z + h11 * vz1;
       } else {
@@ -892,24 +1340,104 @@ export function createScene(canvas, audioSystem = null) {
       }
       const targetPosY = left.y + (right.y - left.y) * tNorm;
 
-      // Smoothstep yaw angular interpolation
-      const yawDiff = Math.atan2(Math.sin(right.yaw - left.yaw), Math.cos(right.yaw - left.yaw));
-      const smoothYawT = t2 * (3 - 2 * tNorm);
+      // Linear angular interpolation preserves a constant turning rate across packets.
+      const yawDiff = Math.atan2(
+        Math.sin(right.yaw - left.yaw),
+        Math.cos(right.yaw - left.yaw),
+      );
+      const smoothYawT = tNorm;
       const targetYaw = left.yaw + yawDiff * smoothYawT;
 
+      const sinceLatest = Math.max(
+        0,
+        Math.min(0.08, (renderAt - right.at) / 1000),
+      );
+      const nearContact = targets.some(
+        (other) =>
+          other.id !== t.id && Math.hypot(other.x - t.x, other.z - t.z) < 13,
+      );
+      if (sinceLatest > 0 && !nearContact && !(t.impact > 0.05)) {
+        const ahead = {
+          x: targetPosX + (right.vx || 0) * sinceLatest,
+          z: targetPosZ + (right.vz || 0) * sinceLatest,
+        };
+        if (nearest(ahead.x, ahead.z).distance < TRACK.width / 2 - 2) {
+          targetPosX = ahead.x;
+          targetPosZ = ahead.z;
+        }
+      }
+      const canPredict =
+        isMine &&
+        currentPhase === "racing" &&
+        t.finished === null &&
+        !localInput.reset &&
+        !nearContact &&
+        now - c.samples.at(-1).at < 180 &&
+        !(t.impact > 0.05) &&
+        nearest(t.x, t.z).distance < TRACK.width / 2 - 3;
+      c.predBlend =
+        (c.predBlend || 0) +
+        ((canPredict ? 1 : 0) - (c.predBlend || 0)) * (1 - Math.exp(-18 * dt));
+      if (canPredict && c.prediction) {
+        const predictionDt = Math.min(
+          0.05,
+          Math.max(0, (now - c.predictedAt) / 1000),
+        );
+        for (let step = 0; step < predictionDt; step += 1 / 60)
+          predict(
+            c.prediction,
+            localInput,
+            Math.min(1 / 60, predictionDt - step),
+          );
+        if (
+          nearest(c.prediction.x, c.prediction.z).distance >
+          TRACK.width / 2 - 2
+        ) {
+          c.prediction = { ...t };
+          c.predBlend = 0;
+        }
+      }
+      c.predictedAt = now;
+      if (c.reconcile) {
+        c.reconcile.x *= Math.exp(-14 * dt);
+        c.reconcile.z *= Math.exp(-14 * dt);
+        targetPosX += c.reconcile.x * c.predBlend;
+        targetPosZ += c.reconcile.z * c.predBlend;
+      }
+      let displayYaw = targetYaw;
+      if (isMine && c.prediction) {
+        targetPosX += (c.prediction.x - targetPosX) * c.predBlend;
+        targetPosZ += (c.prediction.z - targetPosZ) * c.predBlend;
+        displayYaw +=
+          Math.atan2(
+            Math.sin(c.prediction.yaw - targetYaw),
+            Math.cos(c.prediction.yaw - targetYaw),
+          ) * c.predBlend;
+      }
+      if (c.recovery) {
+        c.recovery.x *= Math.exp(-12 * dt);
+        c.recovery.z *= Math.exp(-12 * dt);
+        targetPosX += c.recovery.x;
+        targetPosZ += c.recovery.z;
+      }
       c.root.position.set(targetPosX, targetPosY, targetPosZ);
-      c.root.rotation.y = targetYaw;
+      c.root.rotation.y = displayYaw;
 
       // Update 3D spatialized opponent engine audio
-      if (audioSystem && !isMine && racing) {
+      if (
+        audioSystem &&
+        !isMine &&
+        currentPhase === "racing" &&
+        t.finished === null
+      ) {
         audioSystem.updateRemoteCar(
           c.root.name,
           c.root.position,
           camera.position,
           t.speed || 0,
-          !!t.throttle
+          !!t.throttle,
         );
-      }
+      } else if (!isMine) audioSystem?.removeRemoteCar(c.root.name);
 
       // Active brake lights and glowing carbon discs
       c.brakeLights.forEach((light) => light.setEnabled(!!t.braking));
@@ -922,9 +1450,11 @@ export function createScene(canvas, audioSystem = null) {
       c.brakeDiscs.forEach((d) => (d.material = discMat));
 
       // Responsive steering: zero latency visual turn-in
-      const rawSteerInput = (localInput.left ? -1 : 0) + (localInput.right ? 1 : 0);
+      const rawSteerInput =
+        (localInput.left ? -1 : 0) + (localInput.right ? 1 : 0);
       if (isMine) {
-        localSteerAngle += (rawSteerInput - localSteerAngle) * (1 - Math.exp(-32 * dt));
+        localSteerAngle +=
+          (rawSteerInput - localSteerAngle) * (1 - Math.exp(-32 * dt));
       }
       const visualSteer = isMine ? localSteerAngle : t.steer;
 
@@ -942,7 +1472,7 @@ export function createScene(canvas, audioSystem = null) {
       }
 
       // Spark bursts on physical impact
-      if (t.impact > 0.08) {
+      if (t.impact > (c.lastImpact || 0) + 0.06) {
         emitSparks(
           c.root.position.x,
           c.root.position.y + 0.25,
@@ -952,6 +1482,7 @@ export function createScene(canvas, audioSystem = null) {
         );
       }
 
+      c.lastImpact = t.impact || 0;
       // Dynamic suspension pitch (squat on gas, dive on brake) and roll into turns
       const targetPitch = (t.throttle ? 0.022 : 0) - (t.braking ? 0.038 : 0);
       const targetRoll = -visualSteer * Math.min(1, t.speed / 24) * 0.075;
@@ -978,7 +1509,7 @@ export function createScene(canvas, audioSystem = null) {
               { x: b.position.x, z: b.position.z, yaw: b.rotation.y },
             );
           if (hit) {
-            const correction = Math.min(hit.depth + 0.002, 0.35) * 0.5;
+            const correction = (hit.depth + 0.002) * 0.5;
             a.position.x -= hit.x * correction;
             a.position.z -= hit.z * correction;
             b.position.x += hit.x * correction;
@@ -1005,9 +1536,9 @@ export function createScene(canvas, audioSystem = null) {
         speed = mine.target.speed;
 
       // Screen shake impulse on impact
-      if (mine.target.impact > 0.08) {
-        camShake = Math.min(0.45, camShake + mine.target.impact * 0.35);
-      }
+      if (mine.target.impact > (mine.cameraImpact || 0) + 0.06)
+        camShake = Math.min(0.12, mine.target.impact * 0.1);
+      mine.cameraImpact = mine.target.impact || 0;
       camShake *= Math.exp(-9 * dt);
 
       // Smooth chase camera distance and height
@@ -1046,6 +1577,10 @@ export function createScene(canvas, audioSystem = null) {
       camera.setTarget(new Vector3(120, 2, 0));
     }
 
+    audioSystem?.listener(
+      camera.position,
+      camera.getTarget().subtract(camera.position).normalize(),
+    );
     scene.render();
 
     // Floating broadcast driver tags: positioned safely above car (+2.65m)
@@ -1083,17 +1618,13 @@ export function createScene(canvas, audioSystem = null) {
         x > innerWidth - 80 ||
         y < 120 ||
         y > innerHeight - 80 ||
-        occupied.some(
-          (p) => Math.abs(p.x - x) < 140 && Math.abs(p.y - y) < 32,
-        );
+        occupied.some((p) => Math.abs(p.x - x) < 140 && Math.abs(p.y - y) < 32);
       c.label.hidden = hidden;
       if (!hidden) {
         occupied.push({ x, y });
         const scale = Math.max(0.72, Math.min(1.05, 26 / distance));
         c.label.style.transform = `translate(-50%,-100%) translate(${x.toFixed(1)}px,${y.toFixed(1)}px) scale(${scale.toFixed(2)})`;
-        c.label.style.opacity = String(
-          Math.min(1, (150 - distance) / 25),
-        );
+        c.label.style.opacity = String(Math.min(1, (150 - distance) / 25));
       }
     }
   });
@@ -1102,7 +1633,14 @@ export function createScene(canvas, audioSystem = null) {
 
   return {
     update,
-    input: keys=>{localInput={...keys};},
+    input: (keys, history = []) => {
+      localInput = { ...keys };
+      inputHistory = history;
+    },
+    network: (offset, rtt) => {
+      serverOffset = offset;
+      predictionRtt = rtt;
+    },
     quality: (level) => {
       engine.setHardwareScalingLevel([2, 1.5, 1][level]);
       if (shadowGen) {

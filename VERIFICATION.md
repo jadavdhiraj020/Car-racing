@@ -1,52 +1,39 @@
 # Verification record
 
-Checked on 2026-09-12, Windows, Node.js 24.19.0.
+Checked 2026-09-13 on Windows with Node.js 24.19.0. No test files were created or modified for this overhaul. Additional checks ran as inline Node scripts.
 
-## Observed passing checks
+## Passing checks
 
-- Dependency installation completed; npm reported zero known vulnerabilities at install time.
-- Production Vite build completed. Main browser bundle is about 1.13 MB (280 KB gzip), plus shader chunks. Vite's large-chunk advisory remains; it is not a build error.
-- Development server started; `/health` returned `{"ok":true}` and the Vite-transformed main module returned HTTP 200.
-- Production server started and served the browser app.
-- Track continuity and nearest-track projection tested across the complete loop.
-- Server simulation tested for acceleration, braking/reverse, ground contact and barrier containment.
-- Stale inputs and lobby inputs do not accelerate cars.
-- Checkpoint tests reject skipped/backward gates and accept 72 ordered crossings.
-- An automated driver physically completed three laps using steering/throttle through the actual Cannon simulation, without teleporting between checkpoints.
-- Real Socket.IO clients tested create/join errors, room isolation, host-only start/rematch, countdown phase, network movement observed by a second client, finish/results, rematch reset and empty-room cleanup.
-- Seven connecting clients tested six-player room capacity, unique colors, ignored spoofed progress, actual host disconnect transfer and finish-window timeout.
-- Two headless Chrome pages loaded Babylon's rendered scene, created/joined a room, showed synchronized countdown, accelerated with keyboard controls, turned, reset, and left their room without page JavaScript errors.
-- Browser results and rematch presentation checked using a server-side finish fixture. This is a UI test, not a human-driven full-race browser test.
-- Screenshots inspected at 1440×1000 and 390×844: home, race, remote view, results and narrow home layout.
+- Production Vite build: successful. Main bundle approximately 1.46 MB / 379 KB gzip, plus lazy shader modules and local fonts. Vite retains its size advisory.
+- All eight existing tests pass: circuit continuity, physics acceleration/braking/reverse, barriers, stale input, checkpoint order, three physically driven laps, real Socket.IO lifecycle, isolation, authority, capacity, disconnect host transfer and finish timeout.
+- Opposing 50 m/s cars: detected impact, no penetration or pass-through in the sampled simulation. Occupied-checkpoint resets selected a free position.
+- Six moving cars over 900 physics ticks: maximum measured overlap 0; barrier footprint excess 0. Mean simulation tick 1.54 ms, p95 1.89 ms on this machine, outside the software-rendering stress run.
+- Two independent Chrome windows loaded the production build and passed create/join, quality switching, synchronized countdown, keyboard acceleration/turning/reset, winner/results, rematch, leave and narrow layout. No JavaScript errors in the final native-GPU run.
+- Results presentation uses the existing server-side finish fixture; the separate server test physically drives three complete laps. This is not a human-driven browser race to the finish.
+- Audio toggles ON/OFF/ON succeed during racing without exceptions. Procedural engine/gear/shift/tire/kerb/impact audio is retained, RPM now drops on upshift, audio resumes correctly, and opponent positions use the correct coordinate conversion for stereo.
+- Added 120 ms input delay and 120 ms snapshot delay, then suppressed snapshots for 350 ms: both clients stayed in the same race and recovered fresh state. This models transient application-message delay, not an exhaustive WAN packet-loss test.
+- Player labels use text content; a nickname containing HTML is displayed literally.
+- Visually inspected production screenshots: car geometry and wheel sidewalls, race HUD, track direction, results and mobile home. Screenshots are in ignored test-artifacts/.
+
+## Performance observations
+
+- One 1440 x 1000 native-GPU browser with two network cars, Medium and audio: mean 18.61 ms (about 54 FPS), p95 34.6 ms over 180 frames, reaching 180 km/h. Some frame spikes remain on this integrated GPU.
+- Two simultaneous 1440 x 1000 Chrome windows, Medium, Intel UHD / Direct3D11, audio active: mean frame interval 20.21 ms (about 49 FPS), p95 27.9 ms over 180 frames. Both clients share one GPU.
+- Two 960 x 640 windows using SwiftShader software graphics: mean 100.08 ms, p95 124.8 ms. Software rendering is substantially slower and is not recommended for playing.
+- An initial shared-context browser harness missed countdown assertions under load. Independent contexts completed the full assertions. A native run had one transient shader-fetch failure; the final rerun passed with request-failure monitoring and no page errors.
+- These are short local measurements, not a universal 60 FPS or internet-latency guarantee.
 
 ## Reproduce
 
-```powershell
-npm.cmd ci
-npm.cmd test
-npm.cmd run build
-npm.cmd run test:browser
-```
+Run npm.cmd ci, npm.cmd test, npm.cmd run build, then npm.cmd start. The existing npm.cmd run test:browser script uses software Chrome graphics. Native verification evaluated those same assertions in memory with --use-angle=d3d11 and one browser.newPage context per driver; no test source was changed. Additional latency and performance checks also ran inline without writing test files.
 
-The browser script requires installed Google Chrome. It runs a temporary local production server, then closes it. Screenshots go to the ignored `test-artifacts/` directory.
+For manual multiplayer verification, open two independent browser windows, create/join the same room, enable sound, start, drive, finish three laps and rematch. Use the deployed HTTPS URL to test separate homes.
 
-## Not yet verified / intentional limits
+## Limits
 
-- No Render deployment was performed: no Render deployment credentials or connected account were available. No public URL exists yet.
-- HTTPS/WSS configuration is prepared, but public connectivity and play between separate homes require the deployed service.
-- Chrome used software WebGL in headless tests. These establish rendering and behavior, not a desktop GPU frame-rate guarantee.
-- Narrow-screen layout was checked; physical mobile touch play and audio quality were not manually tested.
-- No packet-loss/large-latency testing; controls are server authoritative without local prediction.
-- Players disconnected during a race cannot resume it. Rejoin a lobby after the host rematches; host automatically transfers.
-- Cars are ghosts relative to one another. Ground and barriers collide. There is no suspension or car-to-car impact simulation.
-- No persistence, saved rankings, accounts or paid assets. Render restarts clear rooms.
-- Engine and countdown/results tones are synthesized. Dedicated collision/finish-per-driver sounds are not included.
-- Free-tier availability and allowance can change; official hosting references are in README.md.
-
-The local implementation is working under the tests above. The complete online goal remains pending one-time account setup and a public race check.
-
-## Follow-up verification
-
-The circuit now includes a long straight, broad sweepers and a tighter left/right chicane. Eight server tests pass, including explicit turn geometry and three physically driven laps on the revised circuit. Graphics now defaults to Medium and offers Low/Medium/High. GitHub account access was confirmed as jadavdhiraj020; no repository is linked and Render access is not available. Public deployment remains blocked on the external account steps.
-
-The follow-up two-page Chrome run also passed, including all three graphics settings, room creation/join, countdown, keyboard driving, result fixture, rematch and leave, with no page JavaScript errors.
+- Public deployment and play between separate homes were not verified in this run. The existing GitHub main branch is the requested delivery target; Render configuration remains intact.
+- A transport disconnect removes the player and transfers host. Full mid-race rejoining is intentionally unchanged; transient message gaps are handled separately.
+- Physics remains an arcade handling model with authoritative contacts; suspension and weight-transfer animation are approximations, not a full tire/suspension simulator.
+- Audio is original procedural synthesis, not recorded F1 engine samples. Perceptual realism has not been independently rated or tested on physical mobile devices.
+- Contact stress checks found no overlap in their tested cases; finite simulation and arbitrary network failures cannot provide an absolute guarantee for every possible situation.
+- Rooms remain in memory. Server restarts/deploys clear them. No persistence, accounts or unrelated features were added.

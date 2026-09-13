@@ -1,3 +1,6 @@
+import "@fontsource/barlow-condensed/latin-700.css";
+import "@fontsource/dm-sans/latin-400.css";
+import "@fontsource/dm-sans/latin-600.css";
 import "./style.css";
 import { io } from "socket.io-client";
 import { createScene } from "./scene.js";
@@ -18,8 +21,33 @@ let view,
   lastGantryStep = -1,
   quality = 1;
 
-window.__getState = () => state;
-window.__getKeys = () => keys;
+window.__getState = () => (state ? structuredClone(state) : null);
+window.__getKeys = () => ({ ...keys });
+let clockKnown = false,
+  clockSamples = [],
+  inputSeq = 0,
+  inputHistory = [],
+  lastRender = 0,
+  lastMap = 0,
+  uiSignature = "";
+function syncClock() {
+  if (!socket.connected) return;
+  const start = Date.now();
+  socket.timeout(2000).emit("clock", {}, (error, serverTime) => {
+    if (error || !Number.isFinite(serverTime)) return;
+    const end = Date.now();
+    clockSamples.push({
+      rtt: end - start,
+      offset: serverTime - (start + end) / 2,
+    });
+    clockSamples = clockSamples.slice(-8);
+    const best = [...clockSamples].sort((a, b) => a.rtt - b.rtt)[0];
+    offset = best.offset;
+    clockKnown = true;
+    view?.network(offset, best.rtt);
+  });
+}
+setInterval(syncClock, 5000);
 
 import { EngineAudio } from "./audio.js";
 
@@ -48,8 +76,14 @@ function beep(freq = 600, duration = 0.12) {
 
 $("sound").onclick = async () => {
   sound = !sound;
-  if (sound) {try {await engineAudio.init();}catch {sound=false;notice("Audio could not start. Try Chrome or Edge over HTTPS.");}}
-  else engineAudio.mute();
+  if (sound) {
+    try {
+      await engineAudio.init();
+    } catch {
+      sound = false;
+      notice("Audio could not start. Try Chrome or Edge over HTTPS.");
+    }
+  } else engineAudio.mute();
   $("sound").textContent = sound ? "SOUND ON" : "SOUND OFF";
 };
 
@@ -111,6 +145,11 @@ $("copy").onclick = async () => {
 
 socket.on("connect", () => {
   $("connection").textContent = "● ONLINE";
+  inputSeq = 0;
+  inputHistory = [];
+  clockKnown = false;
+  clockSamples = [];
+  syncClock();
 });
 
 socket.on("disconnect", () => {
@@ -201,13 +240,15 @@ function render() {
           ? "LEADER"
           : c.finished !== null
             ? time(c.finished)
-            : `+${Math.max(0.1, (leaderProgress - c.progress) * 1.5).toFixed(1)}s`;
-      return `<div class="leader-row ${isMe ? "me" : ""}">` +
+            : `+${Math.round((Math.max(0, leaderProgress - c.progress) * LENGTH) / 24)}m`;
+      return (
+        `<div class="leader-row ${isMe ? "me" : ""}">` +
         `<span class="leader-pos">${i + 1}</span>` +
         `<i class="swatch" style="background:${p?.color || "#fff"}"></i>` +
         `<span class="leader-name">${esc(p?.name || "Driver")}</span>` +
         `<span class="leader-gap">${c.finished !== null ? "FIN" : delta}</span>` +
-        `</div>`;
+        `</div>`
+      );
     })
     .join("");
 
@@ -233,20 +274,45 @@ function render() {
 socket.on("state", (s) => {
   if (!s || !Array.isArray(s.cars) || !Array.isArray(s.players)) return;
   state = s;
-  offset = s.serverNow - Date.now();
+  if (!clockKnown) offset = s.serverNow - Date.now();
+  updateHud();
   try {
     view?.update(s, socket.id);
   } catch (err) {
     console.warn("View update warning:", err);
   }
   if (lastPhase !== s.phase) {
-    if (s.phase === "results") { if(sound) engineAudio.celebrate();
-      document.querySelectorAll('.confetti').forEach(e=>e.remove());
-      for(let i=0;i<28;i++){const piece=document.createElement('i');piece.className='confetti';piece.style.cssText='--x:'+((i*37)%100)+'vw;--delay:'+(i%7)*.09+'s;--hue:'+(i*43)+';';document.body.append(piece);setTimeout(()=>piece.remove(),4500);} document.getElementById("results").classList.remove("celebrate"); requestAnimationFrame(()=>document.getElementById("results").classList.add("celebrate")); }
+    if (s.phase === "results") {
+      if (sound) engineAudio.celebrate();
+      document.querySelectorAll(".confetti").forEach((e) => e.remove());
+      for (let i = 0; i < 28; i++) {
+        const piece = document.createElement("i");
+        piece.className = "confetti";
+        piece.style.cssText =
+          "--x:" +
+          ((i * 37) % 100) +
+          "vw;--delay:" +
+          (i % 7) * 0.09 +
+          "s;--hue:" +
+          i * 43 +
+          ";";
+        document.body.append(piece);
+        setTimeout(() => piece.remove(), 4500);
+      }
+      document.getElementById("results").classList.remove("celebrate");
+      requestAnimationFrame(() =>
+        document.getElementById("results").classList.add("celebrate"),
+      );
+    }
     lastPhase = s.phase;
   }
   sendInput();
-  render();
+  const signature = s.phase + s.host + s.players.map((p) => p.id).join(",");
+  if (signature !== uiSignature || performance.now() - lastRender > 100) {
+    render();
+    lastRender = performance.now();
+    uiSignature = signature;
+  }
   if (s.phase === "lobby") {
     const url = new URL(location.href);
     url.searchParams.set("room", s.code);
@@ -298,22 +364,31 @@ window.addEventListener("keydown", (e) => {
   const key = resolveKey(e);
   if (key && state) {
     e.preventDefault();
-    keys[key] = true;
-    sendInput();
+    if (!keys[key]) {
+      keys[key] = true;
+      sendInput(true);
+    }
   }
 });
 
 window.addEventListener("keyup", (e) => {
   const key = resolveKey(e);
-  if (key) {keys[key] = false;sendInput();}
+  if (key) {
+    keys[key] = false;
+    sendInput(true);
+  }
 });
 
 window.addEventListener("blur", () => {
   for (const k in keys) keys[k] = false;
+  sendInput(true);
 });
 
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) for (const k in keys) keys[k] = false;
+  if (document.hidden) {
+    for (const k in keys) keys[k] = false;
+    sendInput(true);
+  }
 });
 
 document.querySelectorAll("[data-key]").forEach((b) => {
@@ -321,20 +396,26 @@ document.querySelectorAll("[data-key]").forEach((b) => {
     e.preventDefault();
     b.setPointerCapture(e.pointerId);
     keys[b.dataset.key] = true;
-    sendInput();
+    sendInput(true);
   };
   b.onpointerup =
     b.onpointercancel =
     b.onlostpointercapture =
-      () => (keys[b.dataset.key] = false);
+      () => {
+        keys[b.dataset.key] = false;
+        sendInput(true);
+      };
 });
 
 let lastInputSent = 0;
-function sendInput() {
-  view?.input(keys);
+function sendInput(force = false) {
+  view?.input(keys, inputHistory);
   const now = performance.now();
-  if (state && socket.connected && now - lastInputSent >= 25) {
-    socket.emit("input", keys);
+  if (state && socket.connected && (force || now - lastInputSent >= 33)) {
+    const packet = { ...keys, seq: ++inputSeq };
+    socket.volatile.emit("input", packet);
+    inputHistory.push({ seq: packet.seq, at: now, input: { ...keys } });
+    if (inputHistory.length > 90) inputHistory.shift();
     lastInputSent = now;
   }
 }
@@ -346,7 +427,7 @@ function updateCountdown() {
     elapsed = now - state.startAt;
   const count =
     state.phase === "countdown"
-      ? String(Math.max(1, Math.ceil(-elapsed / 1000)))
+      ? String(Math.min(3, Math.max(1, Math.ceil(-elapsed / 1000))))
       : state.phase === "racing" && elapsed < 1000
         ? "GO!"
         : "";
@@ -416,7 +497,7 @@ function frame() {
   requestAnimationFrame(frame);
   sendInput();
   if (!state) {
-    if (sound) engineAudio.mute();
+    if (sound) engineAudio.silence();
     return;
   }
   const c = state.cars.find((c) => c.id === socket.id);
@@ -438,11 +519,20 @@ function frame() {
 
   if (sound) engineAudio.impact(c.impact || 0);
   $("gear").textContent =
-    keys.down && c.speed < 2 ? "R" : state.phase !== "racing" ? "N" : engineAudio.gear;
-  const rpmPercent = Math.min(100, Math.max(0, (engineAudio.rpm / 13500) * 100));
+    keys.down && c.speed < 2
+      ? "R"
+      : state.phase !== "racing"
+        ? "N"
+        : engineAudio.gear;
+  const rpmPercent = Math.min(
+    100,
+    Math.max(0, (engineAudio.rpm / 13500) * 100),
+  );
   $("rpm").style.setProperty("--rpm", rpmPercent);
   $("rpm").classList.toggle("shift-blink", engineAudio.rpm > 12400);
-  view?.input(keys);
+  view?.input(keys, inputHistory);
+  if (performance.now() - lastMap < 50) return;
+  lastMap = performance.now();
   // 2D Circuit Minimap (scaled for the new grand-prix circuit)
   map.clearRect(0, 0, 180, 200);
   const toCX = (x) => 95 + (x + 20) * 0.23;

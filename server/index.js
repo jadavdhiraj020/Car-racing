@@ -146,9 +146,21 @@ export async function createGame({ dev = false } = {}) {
       broadcast(r);
     });
     action("leave", () => leave(s));
+    s.on("clock", (_data, ack) => {
+      if (typeof ack === "function") ack(Date.now());
+    });
     s.on("input", (data) => {
       const c = rooms.get(s.data.room)?.race.cars.get(s.id);
       if (!c || !data || typeof data !== "object") return;
+      if (data.seq !== undefined) {
+        if (
+          !Number.isSafeInteger(data.seq) ||
+          data.seq < 0 ||
+          data.seq <= (c.inputSeq || 0)
+        )
+          return;
+        c.inputSeq = data.seq;
+      }
       c.input = Object.fromEntries(
         ["up", "down", "left", "right", "drift", "reset"].map((k) => [
           k,
@@ -159,26 +171,40 @@ export async function createGame({ dev = false } = {}) {
     });
     s.on("disconnect", () => leave(s));
   });
-  let ticks = 0;
+  let ticks = 0,
+    lastTick = performance.now(),
+    accumulator = 0;
   const interval = setInterval(() => {
-    const now = Date.now();
-    for (const r of rooms.values()) {
-      if (r.phase === "countdown" && now >= r.startAt) r.phase = "racing";
-      r.race.step(1 / 60, now, r.phase === "racing", r.startAt);
-      if (r.phase === "racing") {
-        const cars = [...r.race.cars.values()];
-        if (cars.some((c) => c.finished) && !r.endAt) r.endAt = now + 60000;
+    const mono = performance.now();
+    accumulator += Math.min(0.15, (mono - lastTick) / 1000);
+    lastTick = mono;
+    while (accumulator >= 1 / 60) {
+      accumulator -= 1 / 60;
+      const now = Date.now() - accumulator * 1000;
+      for (const r of rooms.values()) {
+        if (r.phase === "countdown" && now >= r.startAt) r.phase = "racing";
+        if (r.phase !== "lobby")
+          r.race.step(1 / 60, now, r.phase === "racing", r.startAt);
+        if (r.phase === "racing") {
+          const cars = [...r.race.cars.values()];
+          if (cars.some((c) => c.finished) && !r.endAt) r.endAt = now + 60000;
+          if (
+            cars.every((c) => c.finished) ||
+            (r.endAt && now >= r.endAt) ||
+            now - r.startAt > 600000
+          )
+            r.phase = "results";
+        }
         if (
-          cars.every((c) => c.finished) ||
-          (r.endAt && now >= r.endAt) ||
-          now - r.startAt > 600000
+          ticks %
+            (r.phase === "lobby" ? 30 : r.phase === "results" ? 12 : 2) ===
+          0
         )
-          r.phase = "results";
+          broadcast(r);
       }
-      if (ticks % 2 === 0) broadcast(r);
+      ticks++;
     }
-    ticks++;
-  }, 1000 / 60);
+  }, 8);
   return {
     http,
     io,
@@ -187,7 +213,7 @@ export async function createGame({ dev = false } = {}) {
       clearInterval(interval);
       await vite?.close();
       await new Promise((resolve) => io.close(resolve));
-      await new Promise((resolve) => http.close(resolve));
+      if (http.listening) await new Promise((resolve) => http.close(resolve));
     },
   };
 }

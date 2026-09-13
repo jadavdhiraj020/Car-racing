@@ -52,7 +52,7 @@ export class EngineAudio {
       return;
     }
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
+    if (!AC) throw new Error("Web Audio unavailable");
     const ctx = new AC();
     this.ctx = ctx;
 
@@ -240,6 +240,7 @@ export class EngineAudio {
     }
 
     if (!racing) gear = 1;
+    this.gear = gear;
 
     // Calculate realistic F1 RPM curve
     const gearRatios = [1.0, 0.72, 0.54, 0.42, 0.34, 0.28];
@@ -247,12 +248,15 @@ export class EngineAudio {
 
     let targetRpm = this.idleRpm;
     if (racing && !finished) {
-      const driveSpeedRpm = (speed / 50) * 11500 * (1 / ratio) * 0.42;
-      const throttleRpm = throttle ? 2400 : 0;
+      const driveSpeedRpm = speed * 800 * ratio;
+      const throttleRpm = throttle ? 1000 : 0;
       const brakeDrop = brake ? 600 : 0;
       targetRpm = Math.min(
         this.maxRpm,
-        Math.max(this.idleRpm, this.idleRpm + driveSpeedRpm + throttleRpm - brakeDrop)
+        Math.max(
+          this.idleRpm,
+          this.idleRpm + driveSpeedRpm + throttleRpm - brakeDrop,
+        ),
       );
 
       // Downshift blip
@@ -273,10 +277,13 @@ export class EngineAudio {
 
     // Turbo boost pressure simulation
     const targetBoost = throttle && racing && speed > 5 ? 1.0 : 0.0;
-    this.boost += (targetBoost - this.boost) * (1 - Math.exp(-dt * (throttle ? 4 : 8)));
+    this.boost +=
+      (targetBoost - this.boost) * (1 - Math.exp(-dt * (throttle ? 4 : 8)));
 
     if (!this.ctx || !this.enabled) return;
     const t = this.ctx.currentTime;
+    this.master.gain.setTargetAtTime(racing && !finished ? 0.4 : 0.14, t, 0.06);
+    this.effects.gain.setTargetAtTime(0.25, t, 0.03);
     const isShifting = now < this.shiftUntil && this.shiftType === "up";
 
     // High-RPM rev limiter bouncing at redline
@@ -297,21 +304,36 @@ export class EngineAudio {
     const jitter = Math.sin(now * 0.08) * 1.5;
     this.subOsc.frequency.setTargetAtTime(baseFreq * 0.5, t, 0.02);
     this.midOsc.frequency.setTargetAtTime(baseFreq + jitter, t, 0.02);
-    this.highOsc.frequency.setTargetAtTime(baseFreq * 2 + jitter * 1.8, t, 0.02);
+    this.highOsc.frequency.setTargetAtTime(
+      baseFreq * 2 + jitter * 1.8,
+      t,
+      0.02,
+    );
     this.raspOsc.frequency.setTargetAtTime(baseFreq * 3, t, 0.02);
 
     // Turbo whistle tracks boost pressure and RPM
     const turboFreq = 2200 + this.boost * 2400 + (this.rpm / this.maxRpm) * 800;
     this.turboOsc.frequency.setTargetAtTime(turboFreq, t, 0.03);
-    this.turboGain.gain.setTargetAtTime(racing ? this.boost * 0.14 : 0, t, 0.05);
+    this.turboGain.gain.setTargetAtTime(
+      racing ? this.boost * 0.14 : 0,
+      t,
+      0.05,
+    );
 
     // Formant acoustic filters
     const filterCutoff = Math.min(
       7500,
-      Math.max(450, 700 + (this.rpm / this.maxRpm) * 5800 * (throttle ? 1.35 : 0.65))
+      Math.max(
+        450,
+        700 + (this.rpm / this.maxRpm) * 5800 * (throttle ? 1.35 : 0.65),
+      ),
     );
     this.intakeFilter.frequency.setTargetAtTime(filterCutoff, t, 0.03);
-    this.screamerFilter.frequency.setTargetAtTime(1400 + (this.rpm / this.maxRpm) * 2200, t, 0.04);
+    this.screamerFilter.frequency.setTargetAtTime(
+      1400 + (this.rpm / this.maxRpm) * 2200,
+      t,
+      0.04,
+    );
 
     // Engine volume
     const baseGain = racing && !finished ? (throttle ? 0.62 : 0.38) : 0.22;
@@ -320,14 +342,22 @@ export class EngineAudio {
     // Aerodynamic high-speed wind roar
     const windIntensity = Math.min(1, Math.max(0, (speed - 15) / 35));
     this.windGain.gain.setTargetAtTime(windIntensity * 0.28, t, 0.06);
-    this.windFilter.frequency.setTargetAtTime(500 + windIntensity * 1600, t, 0.06);
+    this.windFilter.frequency.setTargetAtTime(
+      500 + windIntensity * 1600,
+      t,
+      0.06,
+    );
 
     // Tire squeal (drift or heavy braking)
     const isDrifting = drift && speed > 8;
     const isLockingBrakes = brake && speed > 16;
     const skidIntensity = isDrifting ? 0.38 : isLockingBrakes ? 0.26 : 0;
     this.skidGain.gain.setTargetAtTime(skidIntensity, t, 0.04);
-    this.skidFilter.frequency.setTargetAtTime(isDrifting ? 1450 : 1850, t, 0.04);
+    this.skidFilter.frequency.setTargetAtTime(
+      isDrifting ? 1450 : 1850,
+      t,
+      0.04,
+    );
 
     // Apex kerb rumble
     const kerbIntensity = onKerb && speed > 6 ? Math.min(0.4, speed / 60) : 0;
@@ -414,6 +444,10 @@ export class EngineAudio {
       gain.connect(this.effects);
       osc.start(t);
       osc.stop(t + 0.12);
+      osc.onended = () => {
+        osc.disconnect();
+        gain.disconnect();
+      };
     } else if (step === 0) {
       // LIGHTS OUT / GO!
       const osc1 = this.ctx.createOscillator();
@@ -432,6 +466,11 @@ export class EngineAudio {
       osc2.start(t);
       osc1.stop(t + 0.38);
       osc2.stop(t + 0.38);
+      osc2.onended = () => {
+        osc1.disconnect();
+        osc2.disconnect();
+        gain.disconnect();
+      };
     }
   }
 
@@ -442,7 +481,10 @@ export class EngineAudio {
     const t = this.ctx.currentTime;
     o.type = "sine";
     o.frequency.setValueAtTime(frequency, t);
-    o.frequency.exponentialRampToValueAtTime(Math.max(40, frequency * 0.65), t + duration);
+    o.frequency.exponentialRampToValueAtTime(
+      Math.max(40, frequency * 0.65),
+      t + duration,
+    );
     g.gain.setValueAtTime(volume * 0.45, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + duration);
     o.connect(g);
@@ -473,6 +515,10 @@ export class EngineAudio {
       g.connect(this.effects);
       o.start(t);
       o.stop(t + 0.16);
+      o.onended = () => {
+        o.disconnect();
+        g.disconnect();
+      };
     }
   }
 
@@ -481,7 +527,7 @@ export class EngineAudio {
     // Grand Prix podium fanfare
     const chords = [
       [523.25, 659.25, 783.99], // C
-      [587.33, 739.99, 880.00], // D
+      [587.33, 739.99, 880.0], // D
       [659.25, 830.61, 987.77], // E
       [1046.5, 1318.5, 1567.98], // C octave
     ];
@@ -495,11 +541,18 @@ export class EngineAudio {
           o.type = "triangle";
           o.frequency.setValueAtTime(freq, t);
           g.gain.setValueAtTime(0.35, t);
-          g.gain.exponentialRampToValueAtTime(0.001, t + (step === 3 ? 0.8 : 0.28));
+          g.gain.exponentialRampToValueAtTime(
+            0.001,
+            t + (step === 3 ? 0.8 : 0.28),
+          );
           o.connect(g);
           g.connect(this.effects);
           o.start(t);
           o.stop(t + (step === 3 ? 0.8 : 0.28));
+          o.onended = () => {
+            o.disconnect();
+            g.disconnect();
+          };
         });
       }, step * 200);
     });
@@ -508,6 +561,10 @@ export class EngineAudio {
   updateRemoteCar(id, carPos, camPos, speed, throttle) {
     if (!this.ctx || !this.enabled) return;
     const t = this.ctx.currentTime;
+    if (Math.hypot(carPos.x - camPos.x, carPos.z - camPos.z) > 90) {
+      this.removeRemoteCar(id);
+      return;
+    }
     let node = this.remoteCars.get(id);
     if (!node) {
       const panner = this.ctx.createPanner();
@@ -539,21 +596,24 @@ export class EngineAudio {
     }
 
     if (this.ctx.listener.positionX) {
-      this.ctx.listener.positionX.setTargetAtTime(camPos.x, t, 0.04);
-      this.ctx.listener.positionY.setTargetAtTime(camPos.y, t, 0.04);
-      this.ctx.listener.positionZ.setTargetAtTime(camPos.z, t, 0.04);
       node.panner.positionX.setTargetAtTime(carPos.x, t, 0.04);
       node.panner.positionY.setTargetAtTime(carPos.y, t, 0.04);
-      node.panner.positionZ.setTargetAtTime(carPos.z, t, 0.04);
+      node.panner.positionZ.setTargetAtTime(-carPos.z, t, 0.04);
     } else {
-      this.ctx.listener.setPosition(camPos.x, camPos.y, camPos.z);
-      node.panner.setPosition(carPos.x, carPos.y, carPos.z);
+      node.panner.setPosition(carPos.x, carPos.y, -carPos.z);
     }
 
     const freq = Math.max(50, 48 + speed * 4.6);
     node.osc.frequency.setTargetAtTime(freq, t, 0.04);
-    node.filter.frequency.setTargetAtTime(Math.min(2800, 600 + speed * 35), t, 0.04);
-    const targetVol = Math.min(0.32, (speed / 45) * 0.32 * (throttle ? 1.0 : 0.6));
+    node.filter.frequency.setTargetAtTime(
+      Math.min(2800, 600 + speed * 35),
+      t,
+      0.04,
+    );
+    const targetVol = Math.min(
+      0.32,
+      (speed / 45) * 0.32 * (throttle ? 1.0 : 0.6),
+    );
     node.gain.gain.setTargetAtTime(targetVol, t, 0.04);
   }
 
@@ -563,14 +623,44 @@ export class EngineAudio {
     try {
       node.osc.stop();
       node.osc.disconnect();
+      node.filter.disconnect();
       node.gain.disconnect();
       node.panner.disconnect();
     } catch {}
     this.remoteCars.delete(id);
   }
 
+  listener(position, forward) {
+    if (!this.ctx || !this.enabled) return;
+    const l = this.ctx.listener,
+      t = this.ctx.currentTime;
+    if (l.forwardX) {
+      for (const [key, value] of Object.entries({
+        positionX: position.x,
+        positionY: position.y,
+        positionZ: -position.z,
+        forwardX: forward.x,
+        forwardY: forward.y,
+        forwardZ: -forward.z,
+        upX: 0,
+        upY: 1,
+        upZ: 0,
+      }))
+        l[key].setTargetAtTime(value, t, 0.03);
+    } else {
+      l.setPosition(position.x, position.y, -position.z);
+      l.setOrientation(forward.x, forward.y, -forward.z, 0, 1, 0);
+    }
+  }
+  silence() {
+    if (this.master && this.ctx)
+      this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
+    for (const id of [...this.remoteCars.keys()]) this.removeRemoteCar(id);
+  }
   mute() {
     this.enabled = false;
+    if (this.effects && this.ctx)
+      this.effects.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
     if (this.master && this.ctx) {
       this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
     }

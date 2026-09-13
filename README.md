@@ -2,25 +2,25 @@
 
 A complete friends-only racing project: Babylon.js graphics, an authoritative Node.js/Socket.IO server, Cannon physics, private rooms, 2–6 drivers, 3 laps, results, and rematches. No database, player accounts, paid assets, or API keys.
 
-**Status:** implemented and locally tested. Public deployment and a race between different homes are not yet verified. No public game URL has been created. Follow the one-time account steps below; after deployment you do not start a server for each race.
+**Status:** implemented and locally tested. Public deployment and a race between different homes are not yet verified. The repository is connected at https://github.com/jadavdhiraj020/Car-racing. Follow the deployment steps below; after deployment you do not start a server for each race.
 
 ## Technology and architecture
 
-| Part | Choice | Purpose |
-|---|---|---|
-| 3D | Babylon.js 8 | Procedural cars, chicane circuit, palm trees, follow camera |
-| Physics | cannon-es 0.20 (MIT) | Server-side gravity, ground and barrier collisions |
-| Multiplayer | Socket.IO 4 | 30 input packets/second, 20 room snapshots/second |
-| Server | Node.js 24, Express 5 | Serves the website and runs each race |
-| Build | Vite 7 | Builds browser assets |
-| Storage / login | None | Rooms live in memory; players enter nicknames |
-| Hosting | One Render Free web service | One HTTPS URL for website and multiplayer |
+| Part            | Choice                      | Purpose                                                          |
+| --------------- | --------------------------- | ---------------------------------------------------------------- |
+| 3D              | Babylon.js 8                | PBR race cars, flowing circuit, environment and chase camera     |
+| Physics         | cannon-es 0.20 (MIT)        | Server-side ground, barrier and car contacts                     |
+| Multiplayer     | Socket.IO 4                 | Sequenced controls; 30 Hz racing snapshots, 2 Hz lobby snapshots |
+| Server          | Node.js 24, Express 5       | Serves the website and runs each race                            |
+| Build           | Vite 7                      | Builds browser assets                                            |
+| Storage / login | None                        | Rooms live in memory; players enter nicknames                    |
+| Hosting         | One Render Free web service | One HTTPS URL for website and multiplayer                        |
 
-Cannon is a deliberate simplification: the server runs the same lightweight JavaScript simulation without a browser or WASM setup, and Babylon renders its results. Havok is not required or bundled. Cannon is MIT licensed: https://github.com/pmndrs/cannon-es. Opponent cars are ghosts to prevent blocking; ground and barriers are physical. This is an arcade game, not realistic suspension physics.
+Cannon is a deliberate simplification: the server runs the same lightweight JavaScript simulation without a browser or WASM setup, and Babylon renders its results. Havok is not required or bundled. Cannon is MIT licensed: https://github.com/pmndrs/cannon-es. Cars, ground and barriers collide on the server. Two physics substeps plus oriented contact projection keep cars separated, including beside barriers. Handling is an arcade simulation; suspension and body weight transfer are visual approximations.
 
-The client sends six boolean controls; it cannot submit position, laps, or results. The server advances physics at 60 ticks/second, accepts the next checkpoint only in the forward direction, and counts 24 gates per lap. Reset returns to the last accepted checkpoint without increasing progress. A car finishes at 72 crossings. Results appear when everyone remaining finishes, 60 seconds after the first finish, or at the 10-minute race limit. Unfinished drivers receive DNF. Finishes in the same server tick share a time; roster order breaks exact ties.
+The client sends six boolean controls and an input sequence; it cannot submit position, laps, or results. The server advances physics at 60 ticks/second, accepts the next checkpoint only in the forward direction, and counts 24 gates per lap. Reset returns to the last accepted checkpoint without increasing progress. A car finishes at 72 crossings. Results appear when everyone remaining finishes, 60 seconds after the first finish, or at the 10-minute race limit. Unfinished drivers receive DNF. Finish times interpolate the crossing within a physics tick; roster order breaks exact ties.
 
-The browser smooths position and heading between snapshots. This adds some input latency; select a hosting region near the group. No client prediction or lag compensation is implemented. Names are escaped in HTML and drawn as canvas text in 3D. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
+The browser uses a shared steering controller for bounded local prediction, acknowledges input sequences, and reconciles server corrections. Opponents interpolate on a synchronized timeline with a latency-aware buffer and limited extrapolation. Prediction yields to authoritative contacts near other cars and barriers. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
 
 Disconnects immediately remove the driver and transfer host to the next remaining player. Empty rooms are deleted. Socket.IO reconnects transport automatically, but a disconnected driver must join the lobby again; mid-race joining/resuming is intentionally disabled. A host can rematch after results to reopen the lobby. Restarts and deploys erase all rooms.
 
@@ -129,7 +129,7 @@ Render currently offers a Free Node web service with managed HTTPS and public We
 
 ### A. Put the project on GitHub
 
-🔴 **YOU MUST DO THIS — sign in/create your account and publish this repository.** No GitHub repository-creation or Render deployment credentials are available in this environment.
+**This project already uses https://github.com/jadavdhiraj020/Car-racing on main. Skip this repository-creation section for the existing project and connect that repository to Render.** The instructions below apply only when copying the project into a different repository.
 
 Simplest: GitHub Desktop.
 
@@ -185,19 +185,19 @@ git branch -M main
 2. Click **New + → Web Service**. Choose **Git Provider**, connect GitHub, and authorize access to `apex-friends-racing`. Select that repository.
 3. Enter these exact settings:
 
-| Setting | Value |
-|---|---|
-| Name | `apex-friends-racing` (add a suffix if taken) |
-| Language / Runtime | `Node` |
-| Branch | `main` |
-| Region | Closest available to your friends (Singapore for India if offered) |
-| Root Directory | Leave blank |
-| Build Command | `npm ci --include=dev && npm run build` |
-| Start Command | `npm start` |
-| Instance Type | **Free — $0/month** |
-| Health Check Path | `/health` |
-| Environment variable | `NODE_ENV` = `production` |
-| Environment variable | `NODE_VERSION` = `24.19.0` |
+| Setting              | Value                                                              |
+| -------------------- | ------------------------------------------------------------------ |
+| Name                 | `apex-friends-racing` (add a suffix if taken)                      |
+| Language / Runtime   | `Node`                                                             |
+| Branch               | `main`                                                             |
+| Region               | Closest available to your friends (Singapore for India if offered) |
+| Root Directory       | Leave blank                                                        |
+| Build Command        | `npm ci --include=dev && npm run build`                            |
+| Start Command        | `npm start`                                                        |
+| Instance Type        | **Free — $0/month**                                                |
+| Health Check Path    | `/health`                                                          |
+| Environment variable | `NODE_ENV` = `production`                                          |
+| Environment variable | `NODE_VERSION` = `24.19.0`                                         |
 
 4. Click **Deploy Web Service**. Do not select a paid instance, database, disk, or custom domain. Wait for the build log to finish and the status to become **Live**.
 5. Click the `https://...onrender.com` address at the top. This is **both the frontend URL and backend URL**. Open `https://...onrender.com/health`; it should show `{"ok":true}`.
@@ -233,31 +233,31 @@ No public URL exists yet. Render will assign one like `https://apex-friends-raci
 
 ## Troubleshooting
 
-| Problem | Likely reason | Exact fix |
-|---|---|---|
-| `node` / `npm` not recognized | Node missing or old terminal PATH | Install Node 24 LTS from the link above, close every PowerShell window, reopen, run `node --version`. |
-| `npm.ps1 cannot be loaded` | PowerShell script policy | Use `npm.cmd` in every command as shown. No policy change needed. |
-| Port 3000 already in use | Another server is running | Use the existing game at localhost:3000, or stop its terminal with Ctrl+C. For a different port run `$env:PORT='3001'` then `npm.cmd start`; open localhost:3001. |
-| CORS error | Frontend and backend were split or hardcoded URL added | Restore `const ... socket=io()` in main.js and deploy the entire root as one Web Service. No `VITE_SERVER_URL` is needed. Rebuild/redeploy. |
-| Socket.IO connection failed | Server stopped, waking, or wrong URL | Open the same host's `/health`. Start Node locally, or check Render service is Live and wait 60–90 seconds. Reload. |
-| WebSocket failed | Proxy blocks WebSockets | Socket.IO normally falls back to HTTP polling. If it remains offline, try a browser without network-blocking extensions or a different network. |
-| Friends cannot join | Wrong/expired code, full room, active race, localhost invite | Share the deployed HTTPS link. Create a fresh lobby; maximum six people; mid-race joins are disabled. |
-| Works locally but not online | Wrong root/build/start/port | Use the exact Render table above, root blank, `npm ci --include=dev && npm run build`, `npm start`; app must keep supplied PORT behavior. |
-| HTTPS/WSS or mixed-content error | Hardcoded HTTP server | Restore same-origin `io()`. Use Render's HTTPS URL. Rebuild/redeploy. |
-| Blank 3D screen | WebGL disabled or outdated driver/browser | In Chrome Settings → System enable graphics acceleration, relaunch Chrome, update graphics driver; try Edge. Verify `/health` and reload Ctrl+F5. |
-| Low frame rate | High pixel density, weak GPU or software rendering | Click the quality button until it reads **QUALITY LOW**; close extra 3D browser windows; enable hardware acceleration. |
-| Car falls through road | Modified ground/physics code | Original track has a ground plane. Press R. Restore `server/race.js` ground setup and flat track; server auto-resets out-of-bounds cars. |
-| Car stuck at barrier | Steering into wall | Brake/reverse with S or press R (2-second reset cooldown). |
-| Remote cars not moving | Race not started, connection lost, input window unfocused | Wait for GO; focus the driving window; verify ONLINE indicator and `/health`. Disconnected players must rejoin the next lobby. |
-| Car stops accelerating when switching windows | Controls clear on blur, intentionally | Keep the driving window focused. Use another device to drive both simultaneously. |
-| Lap does not count | Gate skipped or driving backward | Follow the glowing next gate. Press R to return to last valid checkpoint. Every gate must be crossed forward. |
-| Deployment build failed | Wrong folder/Node/dependencies | Confirm root blank, Node 24, lockfile committed and exact build command; inspect Render Events → failed deploy → logs. Run `npm.cmd ci` and `npm.cmd run build` locally. |
-| Server crashes / all rooms disappear | Restart, deploy, resource limit or edited code | Check Render Logs, run `npm.cmd test`, redeploy known working commit. Create new rooms; no persistence is expected. |
-| Free hosting sleeps | No traffic for 15 minutes | Open the game and wait about a minute. Create a new room if the old one was lost. No manual server command required. |
-| Service suspended | Free monthly allowance exceeded | Check Render Billing → Monthly Included Usage. Wait for reset or reduce other free services; do not upgrade if you want to remain free. |
-| No sound | Browser audio requires a gesture | Click **SOUND OFF** to turn audio on; check OS volume. |
-| Invite copy fails | Clipboard blocked / insecure LAN HTTP | Copy the address bar; room code is also displayed. Clipboard should work on localhost and deployed HTTPS. |
-| `remote origin already exists` | Repository already connected | Run `git remote -v`. If it is your correct repository, skip `remote add` and run `git push -u origin main`. |
+| Problem                                       | Likely reason                                                | Exact fix                                                                                                                                                                |
+| --------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `node` / `npm` not recognized                 | Node missing or old terminal PATH                            | Install Node 24 LTS from the link above, close every PowerShell window, reopen, run `node --version`.                                                                    |
+| `npm.ps1 cannot be loaded`                    | PowerShell script policy                                     | Use `npm.cmd` in every command as shown. No policy change needed.                                                                                                        |
+| Port 3000 already in use                      | Another server is running                                    | Use the existing game at localhost:3000, or stop its terminal with Ctrl+C. For a different port run `$env:PORT='3001'` then `npm.cmd start`; open localhost:3001.        |
+| CORS error                                    | Frontend and backend were split or hardcoded URL added       | Restore `const ... socket=io()` in main.js and deploy the entire root as one Web Service. No `VITE_SERVER_URL` is needed. Rebuild/redeploy.                              |
+| Socket.IO connection failed                   | Server stopped, waking, or wrong URL                         | Open the same host's `/health`. Start Node locally, or check Render service is Live and wait 60–90 seconds. Reload.                                                      |
+| WebSocket failed                              | Proxy blocks WebSockets                                      | Socket.IO normally falls back to HTTP polling. If it remains offline, try a browser without network-blocking extensions or a different network.                          |
+| Friends cannot join                           | Wrong/expired code, full room, active race, localhost invite | Share the deployed HTTPS link. Create a fresh lobby; maximum six people; mid-race joins are disabled.                                                                    |
+| Works locally but not online                  | Wrong root/build/start/port                                  | Use the exact Render table above, root blank, `npm ci --include=dev && npm run build`, `npm start`; app must keep supplied PORT behavior.                                |
+| HTTPS/WSS or mixed-content error              | Hardcoded HTTP server                                        | Restore same-origin `io()`. Use Render's HTTPS URL. Rebuild/redeploy.                                                                                                    |
+| Blank 3D screen                               | WebGL disabled or outdated driver/browser                    | In Chrome Settings → System enable graphics acceleration, relaunch Chrome, update graphics driver; try Edge. Verify `/health` and reload Ctrl+F5.                        |
+| Low frame rate                                | High pixel density, weak GPU or software rendering           | Click the quality button until it reads **QUALITY LOW**; close extra 3D browser windows; enable hardware acceleration.                                                   |
+| Car falls through road                        | Modified ground/physics code                                 | Original track has a ground plane. Press R. Restore `server/race.js` ground setup and flat track; server auto-resets out-of-bounds cars.                                 |
+| Car stuck at barrier                          | Steering into wall                                           | Brake/reverse with S or press R (2-second reset cooldown).                                                                                                               |
+| Remote cars not moving                        | Race not started, connection lost, input window unfocused    | Wait for GO; focus the driving window; verify ONLINE indicator and `/health`. Disconnected players must rejoin the next lobby.                                           |
+| Car stops accelerating when switching windows | Controls clear on blur, intentionally                        | Keep the driving window focused. Use another device to drive both simultaneously.                                                                                        |
+| Lap does not count                            | Gate skipped or driving backward                             | Follow the glowing next gate. Press R to return to last valid checkpoint. Every gate must be crossed forward.                                                            |
+| Deployment build failed                       | Wrong folder/Node/dependencies                               | Confirm root blank, Node 24, lockfile committed and exact build command; inspect Render Events → failed deploy → logs. Run `npm.cmd ci` and `npm.cmd run build` locally. |
+| Server crashes / all rooms disappear          | Restart, deploy, resource limit or edited code               | Check Render Logs, run `npm.cmd test`, redeploy known working commit. Create new rooms; no persistence is expected.                                                      |
+| Free hosting sleeps                           | No traffic for 15 minutes                                    | Open the game and wait about a minute. Create a new room if the old one was lost. No manual server command required.                                                     |
+| Service suspended                             | Free monthly allowance exceeded                              | Check Render Billing → Monthly Included Usage. Wait for reset or reduce other free services; do not upgrade if you want to remain free.                                  |
+| No sound                                      | Browser audio requires a gesture                             | Click **SOUND OFF** to turn audio on; check OS volume.                                                                                                                   |
+| Invite copy fails                             | Clipboard blocked / insecure LAN HTTP                        | Copy the address bar; room code is also displayed. Clipboard should work on localhost and deployed HTTPS.                                                                |
+| `remote origin already exists`                | Repository already connected                                 | Run `git remote -v`. If it is your correct repository, skip `remote add` and run `git push -u origin main`.                                                              |
 
 ## Verification
 
@@ -270,4 +270,5 @@ See `VERIFICATION.md` for observed checks, not just a mental checklist. Public d
 3. Copy your assigned HTTPS URL and invite a friend on another network for the final online race check.
 
 No local server management is needed after that one-time deployment, subject to free hosting limits.
+
 # Car-racing
