@@ -33,7 +33,7 @@ function notice(text) {
 }
 
 try {
-  view = createScene($("game"));
+  view = createScene($("game"), engineAudio);
 } catch (e) {
   notice(
     "3D could not start. Enable browser hardware acceleration and reload.",

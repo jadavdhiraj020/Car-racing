@@ -96,6 +96,7 @@ export class Race {
         this.reset(c);
         c.resetAt = now;
       }
+      c.impact = (c.impact || 0) * Math.exp(-12 * dt);
       const f = { x: Math.sin(c.yaw), z: Math.cos(c.yaw) },
         v = c.b.velocity;
       let speed = v.x * f.x + v.z * f.z;
@@ -103,11 +104,11 @@ export class Race {
 
       // Smooth, progressive steering response: snappy turn-in with zero twitch
       const targetSteer = (input.left ? -1 : 0) + (input.right ? 1 : 0);
-      c.steer += (targetSteer - c.steer) * (1 - Math.exp(-30 * dt));
+      c.steer += (targetSteer - c.steer) * (1 - Math.exp(-28 * dt));
 
-      // Acceleration and Braking
+      // Acceleration and Braking with dynamic power delivery
       if (input.up) {
-        const punch = 27 - Math.max(0, speed / 50) * 11;
+        const punch = 28 - Math.max(0, speed / 50) * 11.5;
         speed += punch * dt;
       } else if (input.down) {
         if (speed > 1) speed -= 38 * dt; // Decisive braking
@@ -121,10 +122,13 @@ export class Race {
       speed = Math.max(-12, Math.min(50, speed));
       if (!running || c.finished) speed *= Math.exp(-8 * dt);
 
-      // Speed-sensitive steering: agile at low/mid speeds, laser-stable on straights
-      const speedFactor = Math.max(0.35, Math.min(Math.abs(speed) / 7, 1));
-      const stability = 1 / (1 + Math.max(0, Math.abs(speed) - 16) / 52);
-      const turnAuthority = input.drift ? 2.25 : 1.52 * stability;
+      // Speed-sensitive steering with weight transfer dynamics
+      const accelRate = (input.up ? 1 : 0) - (input.down ? 1 : 0);
+      const weightTransfer = Math.max(-0.2, Math.min(0.3, -accelRate * 0.15));
+      const frontGrip = 1.0 + weightTransfer;
+      const speedFactor = Math.max(0.32, Math.min(Math.abs(speed) / 7.5, 1));
+      const stability = 1 / (1 + Math.max(0, Math.abs(speed) - 16) / 54);
+      const turnAuthority = input.drift ? 2.22 : 1.5 * stability * frontGrip;
       c.yaw += c.steer * Math.sign(speed || 1) * speedFactor * turnAuthority * dt;
 
       // Lateral tire grip / controlled drift slip

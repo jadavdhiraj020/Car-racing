@@ -41,6 +41,8 @@ export class EngineAudio {
     this.enabled = false;
     this.lastImpact = 0;
     this.lastPop = 0;
+    this.lastThrottle = false;
+    this.remoteCars = new Map();
   }
 
   async init() {
@@ -263,6 +265,12 @@ export class EngineAudio {
     const rpmAttack = throttle ? 18 : 12;
     this.rpm += (targetRpm - this.rpm) * (1 - Math.exp(-dt * rpmAttack));
 
+    // Turbo wastegate flutter on off-throttle lift at high boost
+    if (this.lastThrottle && !throttle && this.boost > 0.28) {
+      this.wastegateFlutter(this.boost);
+    }
+    this.lastThrottle = throttle;
+
     // Turbo boost pressure simulation
     const targetBoost = throttle && racing && speed > 5 ? 1.0 : 0.0;
     this.boost += (targetBoost - this.boost) * (1 - Math.exp(-dt * (throttle ? 4 : 8)));
@@ -271,10 +279,19 @@ export class EngineAudio {
     const t = this.ctx.currentTime;
     const isShifting = now < this.shiftUntil && this.shiftType === "up";
 
+    // High-RPM rev limiter bouncing at redline
+    let limiterCut = 1.0;
+    if (this.rpm > 13150 && throttle) {
+      limiterCut = Math.sin(now * 0.08) > 0.1 ? 1.0 : 0.06;
+      if (limiterCut < 0.5 && Math.random() < 0.25) {
+        this.exhaustPop(0.35);
+      }
+    }
+
     // F1 engine acoustics: fundamental cylinder firing frequency
     // (V6 at 12,000 RPM fires 600 times per second)
     const baseFreq = Math.max(38, (this.rpm / 60) * 1.5);
-    const cut = isShifting ? 0.15 : 1.0;
+    const cut = (isShifting ? 0.15 : 1.0) * limiterCut;
 
     // Frequency modulation for organic combustion feel
     const jitter = Math.sin(now * 0.08) * 1.5;
@@ -343,6 +360,42 @@ export class EngineAudio {
       popOsc.disconnect();
       popGain.disconnect();
     };
+  }
+
+  wastegateFlutter(boost = 0.5) {
+    if (!this.ctx || !this.effects || !this.enabled) return;
+    const t = this.ctx.currentTime;
+    const bursts = 4;
+    for (let i = 0; i < bursts; i++) {
+      const delay = i * 0.055;
+      const decay = Math.pow(0.55, i);
+      const flutterOsc = this.ctx.createOscillator();
+      const flutterFilter = this.ctx.createBiquadFilter();
+      const flutterGain = this.ctx.createGain();
+
+      flutterOsc.type = "sawtooth";
+      flutterOsc.frequency.setValueAtTime(950 - i * 85, t + delay);
+      flutterOsc.frequency.exponentialRampToValueAtTime(320, t + delay + 0.045);
+
+      flutterFilter.type = "bandpass";
+      flutterFilter.frequency.setValueAtTime(1600 - i * 140, t + delay);
+      flutterFilter.Q.value = 5.0;
+
+      flutterGain.gain.setValueAtTime(boost * 0.22 * decay, t + delay);
+      flutterGain.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.045);
+
+      flutterOsc.connect(flutterFilter);
+      flutterFilter.connect(flutterGain);
+      flutterGain.connect(this.effects);
+
+      flutterOsc.start(t + delay);
+      flutterOsc.stop(t + delay + 0.045);
+      flutterOsc.onended = () => {
+        flutterOsc.disconnect();
+        flutterFilter.disconnect();
+        flutterGain.disconnect();
+      };
+    }
   }
 
   countdownLight(step) {
@@ -452,10 +505,77 @@ export class EngineAudio {
     });
   }
 
+  updateRemoteCar(id, carPos, camPos, speed, throttle) {
+    if (!this.ctx || !this.enabled) return;
+    const t = this.ctx.currentTime;
+    let node = this.remoteCars.get(id);
+    if (!node) {
+      const panner = this.ctx.createPanner();
+      panner.panningModel = "HRTF";
+      panner.distanceModel = "exponential";
+      panner.refDistance = 4;
+      panner.maxDistance = 90;
+      panner.rolloffFactor = 1.1;
+
+      const osc = this.ctx.createOscillator();
+      osc.type = "sawtooth";
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.value = 850;
+      filter.Q.value = 2.2;
+
+      const gain = this.ctx.createGain();
+      gain.gain.value = 0;
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(panner);
+      panner.connect(this.master);
+
+      osc.start(t);
+      node = { panner, osc, filter, gain };
+      this.remoteCars.set(id, node);
+    }
+
+    if (this.ctx.listener.positionX) {
+      this.ctx.listener.positionX.setTargetAtTime(camPos.x, t, 0.04);
+      this.ctx.listener.positionY.setTargetAtTime(camPos.y, t, 0.04);
+      this.ctx.listener.positionZ.setTargetAtTime(camPos.z, t, 0.04);
+      node.panner.positionX.setTargetAtTime(carPos.x, t, 0.04);
+      node.panner.positionY.setTargetAtTime(carPos.y, t, 0.04);
+      node.panner.positionZ.setTargetAtTime(carPos.z, t, 0.04);
+    } else {
+      this.ctx.listener.setPosition(camPos.x, camPos.y, camPos.z);
+      node.panner.setPosition(carPos.x, carPos.y, carPos.z);
+    }
+
+    const freq = Math.max(50, 48 + speed * 4.6);
+    node.osc.frequency.setTargetAtTime(freq, t, 0.04);
+    node.filter.frequency.setTargetAtTime(Math.min(2800, 600 + speed * 35), t, 0.04);
+    const targetVol = Math.min(0.32, (speed / 45) * 0.32 * (throttle ? 1.0 : 0.6));
+    node.gain.gain.setTargetAtTime(targetVol, t, 0.04);
+  }
+
+  removeRemoteCar(id) {
+    const node = this.remoteCars.get(id);
+    if (!node) return;
+    try {
+      node.osc.stop();
+      node.osc.disconnect();
+      node.gain.disconnect();
+      node.panner.disconnect();
+    } catch {}
+    this.remoteCars.delete(id);
+  }
+
   mute() {
     this.enabled = false;
     if (this.master && this.ctx) {
       this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
+    }
+    for (const id of this.remoteCars.keys()) {
+      this.removeRemoteCar(id);
     }
   }
 }

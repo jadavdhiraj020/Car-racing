@@ -16,7 +16,7 @@ import { TRACK, LENGTH, point, gates } from "../../shared/track.js";
 import {PBRMaterial} from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import {RawCubeTexture} from "@babylonjs/core/Materials/Textures/rawCubeTexture";
 import {overlap} from "../../shared/contact.js";
-export function createScene(canvas) {
+export function createScene(canvas, audioSystem = null) {
   const engine = new Engine(canvas, true, {
     stencil: false,
     preserveDrawingBuffer: true,
@@ -87,6 +87,7 @@ export function createScene(canvas) {
   const grass = material("fairway grass", "#3c6b4e", 0.05),
     sand = material("coastal sand", "#c8b082", 0.08),
     road = material("track asphalt", "#283133", 0.22),
+    rubberMat = material("rubber racing groove", "#1a2123", 0.16),
     cream = material("ivory marking", "#f5f3e4", 0.3),
     lime = material("apex neon", "#d6fc71", 0.4, "#2a380e"),
     red = material("curb red", "#df4738", 0.25),
@@ -134,6 +135,21 @@ export function createScene(canvas) {
   );
   surface.material = road;
   surface.receiveShadows = !!shadowGen;
+
+  // Darkened rubber racing line groove along the racing apexes
+  const rubberEdges = [-2.8, 2.8].map((offset) =>
+    Array.from({ length: TRACK.segments + 1 }, (_, i) => {
+      const p = point((i * LENGTH) / TRACK.segments, offset);
+      return new Vector3(p.x, 0.083, p.z);
+    }),
+  );
+  const rubberRibbon = MeshBuilder.CreateRibbon(
+    "rubberRibbon",
+    { pathArray: rubberEdges, sideOrientation: 2 },
+    scene,
+  );
+  rubberRibbon.material = rubberMat;
+  rubberRibbon.receiveShadows = !!shadowGen;
 
   // 3D Kerbs, safety barriers and center dashed line
   const segLen = LENGTH / TRACK.segments;
@@ -205,13 +221,19 @@ export function createScene(canvas) {
     }
   }
 
-  // Starting grid boxes for 6 cars
+  // Starting grid boxes and burnout tire marks for 6 cars
   for (let slot = 0; slot < 6; slot++) {
     const slotS = -8 - Math.floor(slot / 2) * 7;
     const slotOffset = slot % 2 ? 3 : -3;
     const p = point(slotS, slotOffset);
     box("grid box", 2.2, 0.03, 3.8, p.x, 0.1, p.z, cream, p.yaw);
     box("grid fill", 1.9, 0.04, 3.5, p.x, 0.105, p.z, road, p.yaw);
+
+    // Dark burnout tire marks behind each starting slot
+    for (const side of [-0.68, 0.68]) {
+      const pBurn = point(slotS - 2.8, slotOffset + side);
+      box("burnout mark", 0.34, 0.02, 3.4, pBurn.x, 0.09, pBurn.z, dark, pBurn.yaw);
+    }
   }
 
   function sign(text, x, y, z, width = 16, height = 4, yaw = 0, fontSize = 90) {
@@ -299,6 +321,17 @@ export function createScene(canvas) {
     const p = point(200 - dist, 13);
     sign(label, p.x, 2, p.z, 3.5, 2.2, p.yaw + Math.PI / 2, 80);
     box("board post", 0.2, 2, 0.2, p.x, 1, p.z, metal);
+  }
+
+  // Distance marker boards approaching South Sweeper / Carousel
+  for (const [dist, label] of [
+    [150, "150"],
+    [100, "100"],
+    [50, "50"],
+  ]) {
+    const p = point(1080 - dist, 13);
+    sign(label, p.x, 2, p.z, 3.5, 2.2, p.yaw + Math.PI / 2, 80);
+    box("board post south", 0.2, 2, 0.2, p.x, 1, p.z, metal);
   }
 
   // Base palm tree prototype for GPU instancing
@@ -426,6 +459,50 @@ export function createScene(canvas) {
 
     const paint = finish(player.id, player.color, 0.72, 0.16);
     const helmetPaint = finish("helmet_" + player.id, player.color, 0.55, 0.22);
+
+    // Soft contact shadow disc grounded directly beneath car
+    const shadowDisc = MeshBuilder.CreateDisc("contactShadow_" + player.id, { radius: 1.58, tessellation: 18 }, scene);
+    shadowDisc.rotation.x = Math.PI / 2;
+    shadowDisc.position.set(0, 0.024, 0);
+    shadowDisc.scaling.set(0.72, 1.35, 1);
+    shadowDisc.parent = root;
+    const shadowMat = material("contactShadowMat_" + player.id, "#080c0d", 0);
+    shadowMat.alpha = 0.52;
+    shadowDisc.material = shadowMat;
+
+    // High-contrast racing livery stripe and race number plate
+    const isLightColor = ["#ffffff", "#d6fc71", "#e6ffa8"].includes(player.color.toLowerCase());
+    const liveryStripeMat = finish("stripe_" + player.id, isLightColor ? "#141c22" : "#ffffff", 0.8, 0.2);
+    box("livery stripe nose", 0.22, 0.02, 1.3, 0, 0.42, 1.15, liveryStripeMat, 0, chassis);
+    box("livery stripe spine", 0.2, 0.02, 1.1, 0, 0.72, -0.72, liveryStripeMat, 0, chassis);
+
+    const numPlateTex = new DynamicTexture("numTex_" + player.id, { width: 128, height: 128 }, scene);
+    const numVal = ((parseInt(player.id.replace(/\D/g, ""), 10) || 1) % 89) + 11;
+    numPlateTex.drawText(String(numVal), null, 88, "bold 78px sans-serif", "#ffffff", player.color, true);
+    const numMat = material("numMat_" + player.id, "#ffffff");
+    numMat.diffuseTexture = numPlateTex;
+    numMat.emissiveColor = new Color3(0.4, 0.4, 0.4);
+    const nosePlate = MeshBuilder.CreatePlane("nosePlate_" + player.id, { width: 0.38, height: 0.38 }, scene);
+    nosePlate.position.set(0, 0.39, 1.35);
+    nosePlate.rotation.x = Math.PI / 2 - 0.25;
+    nosePlate.material = numMat;
+    nosePlate.parent = chassis;
+
+    // Forward headlight projection beams
+    const beamMat = material("headlightBeamMat_" + player.id, "#ffffff", 0, "#e8ffb0");
+    beamMat.alpha = 0.12;
+    for (const x of [-0.72, 0.72]) {
+      const beam = MeshBuilder.CreateCylinder("beam_" + x, {
+        height: 6.2,
+        diameterTop: 0.28,
+        diameterBottom: 2.2,
+        tessellation: 12,
+      }, scene);
+      beam.rotation.x = Math.PI / 2 + 0.03;
+      beam.position.set(x, 0.25, 4.0);
+      beam.material = beamMat;
+      beam.parent = chassis;
+    }
 
     // Lofted body shells: tapered nose, shoulder lines and rear haunches.
     function shell(name, sections, m) {
@@ -635,9 +712,15 @@ export function createScene(canvas) {
       target: null,
       samples: [],
       dispose: () => {
+        if (audioSystem) audioSystem.removeRemoteCar(player.id);
         root.dispose();
         paint.dispose();
         helmetPaint.dispose();
+        liveryStripeMat.dispose();
+        numMat.dispose();
+        numPlateTex.dispose();
+        shadowMat.dispose();
+        beamMat.dispose();
         label.remove();
       },
     };
@@ -780,21 +863,53 @@ export function createScene(canvas) {
           break;
         }
       }
-      const amount = Math.max(
-        0,
-        Math.min(1, (renderAt - left.at) / Math.max(1, right.at - left.at)),
-      );
+      const spanMs = Math.max(1, right.at - left.at);
+      const amount = Math.max(0, Math.min(1, (renderAt - left.at) / spanMs));
+      const dtSec = spanMs / 1000;
 
-      const targetPosX = left.x + (right.x - left.x) * amount;
-      const targetPosY = left.y + (right.y - left.y) * amount;
-      const targetPosZ = left.z + (right.z - left.z) * amount;
-      const targetYaw =
-        left.yaw +
-        Math.atan2(Math.sin(right.yaw - left.yaw), Math.cos(right.yaw - left.yaw)) *
-          amount;
+      // Hermite cubic spline velocity-guided smoothing
+      const tNorm = amount;
+      const t2 = tNorm * tNorm;
+      const t3 = t2 * tNorm;
+
+      const h00 = 2 * t3 - 3 * t2 + 1;
+      const h10 = t3 - 2 * t2 + tNorm;
+      const h01 = -2 * t3 + 3 * t2;
+      const h11 = t3 - t2;
+
+      const vx0 = (left.vx ?? 0) * dtSec;
+      const vz0 = (left.vz ?? 0) * dtSec;
+      const vx1 = (right.vx ?? 0) * dtSec;
+      const vz1 = (right.vz ?? 0) * dtSec;
+
+      let targetPosX, targetPosZ;
+      if (Math.hypot(vx0, vz0) > 0.01 || Math.hypot(vx1, vz1) > 0.01) {
+        targetPosX = h00 * left.x + h10 * vx0 + h01 * right.x + h11 * vx1;
+        targetPosZ = h00 * left.z + h10 * vz0 + h01 * right.z + h11 * vz1;
+      } else {
+        targetPosX = left.x + (right.x - left.x) * tNorm;
+        targetPosZ = left.z + (right.z - left.z) * tNorm;
+      }
+      const targetPosY = left.y + (right.y - left.y) * tNorm;
+
+      // Smoothstep yaw angular interpolation
+      const yawDiff = Math.atan2(Math.sin(right.yaw - left.yaw), Math.cos(right.yaw - left.yaw));
+      const smoothYawT = t2 * (3 - 2 * tNorm);
+      const targetYaw = left.yaw + yawDiff * smoothYawT;
 
       c.root.position.set(targetPosX, targetPosY, targetPosZ);
       c.root.rotation.y = targetYaw;
+
+      // Update 3D spatialized opponent engine audio
+      if (audioSystem && !isMine && racing) {
+        audioSystem.updateRemoteCar(
+          c.root.name,
+          c.root.position,
+          camera.position,
+          t.speed || 0,
+          !!t.throttle
+        );
+      }
 
       // Active brake lights and glowing carbon discs
       c.brakeLights.forEach((light) => light.setEnabled(!!t.braking));
