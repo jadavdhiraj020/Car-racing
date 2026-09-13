@@ -223,14 +223,15 @@ export class EngineAudio {
     const gearThresholds = [12, 21, 30, 39, 47];
     let gear = this.gear;
 
-    if (speed > (gearThresholds[gear - 1] ?? Infinity) && gear < 6) {
+    const safeSpeed = Number.isFinite(speed) ? speed : 0;
+    if (safeSpeed > (gearThresholds[gear - 1] ?? Infinity) && gear < 6) {
       // Upshift: ignition cut and exhaust crackle
       gear++;
       this.gear = gear;
       this.shiftUntil = now + 65;
       this.shiftType = "up";
       this.exhaustPop(0.7);
-    } else if (gear > 1 && speed < gearThresholds[gear - 2] - 3.5) {
+    } else if (gear > 1 && safeSpeed < gearThresholds[gear - 2] - 3.5) {
       // Downshift: rev-match throttle blip
       gear--;
       this.gear = gear;
@@ -244,11 +245,11 @@ export class EngineAudio {
 
     // Calculate realistic F1 RPM curve
     const gearRatios = [1.0, 0.72, 0.54, 0.42, 0.34, 0.28];
-    const ratio = gearRatios[gear - 1];
+    const ratio = gearRatios[gear - 1] ?? 0.5;
 
     let targetRpm = this.idleRpm;
     if (racing && !finished) {
-      const driveSpeedRpm = speed * 800 * ratio;
+      const driveSpeedRpm = Math.abs(safeSpeed) * 800 * ratio;
       const throttleRpm = throttle ? 1000 : 0;
       const brakeDrop = brake ? 600 : 0;
       targetRpm = Math.min(
@@ -268,6 +269,7 @@ export class EngineAudio {
     // Smooth RPM response
     const rpmAttack = throttle ? 18 : 12;
     this.rpm += (targetRpm - this.rpm) * (1 - Math.exp(-dt * rpmAttack));
+    if (!Number.isFinite(this.rpm)) this.rpm = this.idleRpm;
 
     // Turbo wastegate flutter on off-throttle lift at high boost
     if (this.lastThrottle && !throttle && this.boost > 0.28) {
@@ -276,9 +278,10 @@ export class EngineAudio {
     this.lastThrottle = throttle;
 
     // Turbo boost pressure simulation
-    const targetBoost = throttle && racing && speed > 5 ? 1.0 : 0.0;
+    const targetBoost = throttle && racing && Math.abs(safeSpeed) > 5 ? 1.0 : 0.0;
     this.boost +=
       (targetBoost - this.boost) * (1 - Math.exp(-dt * (throttle ? 4 : 8)));
+    if (!Number.isFinite(this.boost)) this.boost = 0;
 
     if (!this.ctx || !this.enabled) return;
     const t = this.ctx.currentTime;
@@ -560,6 +563,17 @@ export class EngineAudio {
 
   updateRemoteCar(id, carPos, camPos, speed, throttle) {
     if (!this.ctx || !this.enabled) return;
+    if (
+      !carPos ||
+      !camPos ||
+      !Number.isFinite(carPos.x) ||
+      !Number.isFinite(carPos.y) ||
+      !Number.isFinite(carPos.z) ||
+      !Number.isFinite(camPos.x) ||
+      !Number.isFinite(camPos.y) ||
+      !Number.isFinite(camPos.z)
+    )
+      return;
     const t = this.ctx.currentTime;
     if (Math.hypot(carPos.x - camPos.x, carPos.z - camPos.z) > 90) {
       this.removeRemoteCar(id);
@@ -567,54 +581,61 @@ export class EngineAudio {
     }
     let node = this.remoteCars.get(id);
     if (!node) {
-      const panner = this.ctx.createPanner();
-      panner.panningModel = "HRTF";
-      panner.distanceModel = "exponential";
-      panner.refDistance = 4;
-      panner.maxDistance = 90;
-      panner.rolloffFactor = 1.1;
+      try {
+        const panner = this.ctx.createPanner();
+        panner.panningModel = "HRTF";
+        panner.distanceModel = "exponential";
+        panner.refDistance = 4;
+        panner.maxDistance = 90;
+        panner.rolloffFactor = 1.1;
 
-      const osc = this.ctx.createOscillator();
-      osc.type = "sawtooth";
+        const osc = this.ctx.createOscillator();
+        osc.type = "sawtooth";
 
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = "bandpass";
-      filter.frequency.value = 850;
-      filter.Q.value = 2.2;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = "bandpass";
+        filter.frequency.value = 850;
+        filter.Q.value = 2.2;
 
-      const gain = this.ctx.createGain();
-      gain.gain.value = 0;
+        const gain = this.ctx.createGain();
+        gain.gain.value = 0;
 
-      osc.connect(filter);
-      filter.connect(gain);
-      gain.connect(panner);
-      panner.connect(this.master);
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(panner);
+        panner.connect(this.master);
 
-      osc.start(t);
-      node = { panner, osc, filter, gain };
-      this.remoteCars.set(id, node);
+        osc.start(t);
+        node = { panner, osc, filter, gain };
+        this.remoteCars.set(id, node);
+      } catch {
+        return;
+      }
     }
 
-    if (this.ctx.listener.positionX) {
-      node.panner.positionX.setTargetAtTime(carPos.x, t, 0.04);
-      node.panner.positionY.setTargetAtTime(carPos.y, t, 0.04);
-      node.panner.positionZ.setTargetAtTime(-carPos.z, t, 0.04);
-    } else {
-      node.panner.setPosition(carPos.x, carPos.y, -carPos.z);
-    }
+    try {
+      if (node.panner.positionX) {
+        node.panner.positionX.setTargetAtTime(carPos.x, t, 0.04);
+        node.panner.positionY.setTargetAtTime(carPos.y, t, 0.04);
+        node.panner.positionZ.setTargetAtTime(-carPos.z, t, 0.04);
+      } else if (node.panner.setPosition) {
+        node.panner.setPosition(carPos.x, carPos.y, -carPos.z);
+      }
 
-    const freq = Math.max(50, 48 + speed * 4.6);
-    node.osc.frequency.setTargetAtTime(freq, t, 0.04);
-    node.filter.frequency.setTargetAtTime(
-      Math.min(2800, 600 + speed * 35),
-      t,
-      0.04,
-    );
-    const targetVol = Math.min(
-      0.32,
-      (speed / 45) * 0.32 * (throttle ? 1.0 : 0.6),
-    );
-    node.gain.gain.setTargetAtTime(targetVol, t, 0.04);
+      const safeSpeed = Number.isFinite(speed) ? Math.max(0, speed) : 0;
+      const freq = Math.max(50, 48 + safeSpeed * 4.6);
+      node.osc.frequency.setTargetAtTime(freq, t, 0.04);
+      node.filter.frequency.setTargetAtTime(
+        Math.min(2800, 600 + safeSpeed * 35),
+        t,
+        0.04,
+      );
+      const targetVol = Math.min(
+        0.32,
+        (safeSpeed / 45) * 0.32 * (throttle ? 1.0 : 0.6),
+      );
+      node.gain.gain.setTargetAtTime(targetVol, t, 0.04);
+    } catch {}
   }
 
   removeRemoteCar(id) {
@@ -632,25 +653,44 @@ export class EngineAudio {
 
   listener(position, forward) {
     if (!this.ctx || !this.enabled) return;
+    if (
+      !position ||
+      !forward ||
+      !Number.isFinite(position.x) ||
+      !Number.isFinite(position.y) ||
+      !Number.isFinite(position.z) ||
+      !Number.isFinite(forward.x) ||
+      !Number.isFinite(forward.y) ||
+      !Number.isFinite(forward.z)
+    )
+      return;
+    const forwardLen = Math.hypot(forward.x, forward.y, forward.z);
+    if (forwardLen < 0.001) return;
     const l = this.ctx.listener,
       t = this.ctx.currentTime;
-    if (l.forwardX) {
-      for (const [key, value] of Object.entries({
-        positionX: position.x,
-        positionY: position.y,
-        positionZ: -position.z,
-        forwardX: forward.x,
-        forwardY: forward.y,
-        forwardZ: -forward.z,
-        upX: 0,
-        upY: 1,
-        upZ: 0,
-      }))
-        l[key].setTargetAtTime(value, t, 0.03);
-    } else {
-      l.setPosition(position.x, position.y, -position.z);
-      l.setOrientation(forward.x, forward.y, -forward.z, 0, 1, 0);
-    }
+    try {
+      if (l.forwardX) {
+        const params = {
+          positionX: position.x,
+          positionY: position.y,
+          positionZ: -position.z,
+          forwardX: forward.x,
+          forwardY: forward.y,
+          forwardZ: -forward.z,
+          upX: 0,
+          upY: 1,
+          upZ: 0,
+        };
+        for (const [key, value] of Object.entries(params)) {
+          if (l[key]?.setTargetAtTime && Number.isFinite(value)) {
+            l[key].setTargetAtTime(value, t, 0.03);
+          }
+        }
+      } else if (l.setPosition) {
+        l.setPosition(position.x, position.y, -position.z);
+        l.setOrientation(forward.x, forward.y, -forward.z, 0, 1, 0);
+      }
+    } catch {}
   }
   silence() {
     if (this.master && this.ctx)

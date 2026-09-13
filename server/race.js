@@ -140,6 +140,8 @@ export class Race {
       c.steer = motion.steer;
       c.b.velocity.x = motion.vx;
       c.b.velocity.z = motion.vz;
+      c.b.position.y = 0.55;
+      c.b.velocity.y = 0;
       c.ack = c.inputSeq || 0;
       c.b.quaternion.setFromEuler(0, c.yaw, 0);
       c.previous = { x: c.b.position.x, z: c.b.position.z };
@@ -217,12 +219,11 @@ export class Race {
       }
     }
     for (const c of this.cars.values()) {
+      c.b.position.y = 0.55;
+      c.b.velocity.y = 0;
       if (running && !c.finished) this.progress(c, now, startAt, dt);
       c.impact *= Math.exp(-6 * dt);
-      if (
-        c.b.position.y < -5 ||
-        nearest(c.b.position.x, c.b.position.z).distance > 45
-      )
+      if (nearest(c.b.position.x, c.b.position.z).distance > 45)
         this.reset(c);
     }
   }

@@ -113,9 +113,10 @@ export async function createGame({ dev = false } = {}) {
       if (r.phase !== "lobby")
         throw Error("Race in progress. Join after the rematch.");
       if (r.players.size >= 6) throw Error("Room is full (6 players).");
-      const color = colors.find(
-        (c) => ![...r.players.values()].some((p) => p.color === c),
-      );
+      const color =
+        colors.find(
+          (c) => ![...r.players.values()].some((p) => p.color === c),
+        ) || colors[r.players.size % colors.length];
       r.players.set(s.id, { id: s.id, name, color });
       r.race.add(s.id, r.players.size - 1);
       s.data.room = r.code;
@@ -141,6 +142,8 @@ export async function createGame({ dev = false } = {}) {
       if (!r || r.host !== s.id || r.phase !== "results")
         throw Error("Only the host can rematch after results.");
       r.phase = "lobby";
+      r.startAt = 0;
+      r.endAt = 0;
       r.race = new Race();
       [...r.players.keys()].forEach((id, i) => r.race.add(id, i));
       broadcast(r);
@@ -187,9 +190,9 @@ export async function createGame({ dev = false } = {}) {
           r.race.step(1 / 60, now, r.phase === "racing", r.startAt);
         if (r.phase === "racing") {
           const cars = [...r.race.cars.values()];
-          if (cars.some((c) => c.finished) && !r.endAt) r.endAt = now + 60000;
+          if (cars.some((c) => c.finished !== null) && !r.endAt) r.endAt = now + 60000;
           if (
-            cars.every((c) => c.finished) ||
+            (cars.length > 0 && cars.every((c) => c.finished !== null)) ||
             (r.endAt && now >= r.endAt) ||
             now - r.startAt > 600000
           )

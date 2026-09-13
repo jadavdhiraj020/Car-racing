@@ -11,6 +11,39 @@ const $ = (id) => document.getElementById(id),
   keys = {},
   map = $("minimap").getContext("2d");
 
+const toCX = (x) => 95 + (x + 20) * 0.23;
+const toCY = (z) => 100 - (z - 5) * 0.23;
+
+// Pre-render static minimap background once to prevent 3200 binary searches/sec
+const mapBg = document.createElement("canvas");
+mapBg.width = 180;
+mapBg.height = 200;
+const bgCtx = mapBg.getContext("2d");
+
+bgCtx.beginPath();
+for (let i = 0; i <= 160; i++) {
+  const p = point((i * LENGTH) / 160);
+  if (i === 0) bgCtx.moveTo(toCX(p.x), toCY(p.z));
+  else bgCtx.lineTo(toCX(p.x), toCY(p.z));
+}
+bgCtx.closePath();
+bgCtx.strokeStyle = "#b1c4a444";
+bgCtx.lineWidth = 14;
+bgCtx.stroke();
+
+bgCtx.strokeStyle = "#d6fc71aa";
+bgCtx.lineWidth = 3;
+bgCtx.stroke();
+
+const f0 = point(0, -11),
+  f1 = point(0, 11);
+bgCtx.beginPath();
+bgCtx.moveTo(toCX(f0.x), toCY(f0.z));
+bgCtx.lineTo(toCX(f1.x), toCY(f1.z));
+bgCtx.strokeStyle = "#ffffff";
+bgCtx.lineWidth = 2.5;
+bgCtx.stroke();
+
 let view,
   state,
   offset = 0,
@@ -535,35 +568,7 @@ function frame() {
   lastMap = performance.now();
   // 2D Circuit Minimap (scaled for the new grand-prix circuit)
   map.clearRect(0, 0, 180, 200);
-  const toCX = (x) => 95 + (x + 20) * 0.23;
-  const toCY = (z) => 100 - (z - 5) * 0.23;
-
-  // Track outer path
-  map.beginPath();
-  for (let i = 0; i <= 160; i++) {
-    const p = point((i * LENGTH) / 160);
-    if (i === 0) map.moveTo(toCX(p.x), toCY(p.z));
-    else map.lineTo(toCX(p.x), toCY(p.z));
-  }
-  map.closePath();
-  map.strokeStyle = "#b1c4a444";
-  map.lineWidth = 14;
-  map.stroke();
-
-  // Track racing line
-  map.strokeStyle = "#d6fc71aa";
-  map.lineWidth = 3;
-  map.stroke();
-
-  // Start / finish line
-  const f0 = point(0, -11),
-    f1 = point(0, 11);
-  map.beginPath();
-  map.moveTo(toCX(f0.x), toCY(f0.z));
-  map.lineTo(toCX(f1.x), toCY(f1.z));
-  map.strokeStyle = "#ffffff";
-  map.lineWidth = 2.5;
-  map.stroke();
+  map.drawImage(mapBg, 0, 0);
 
   // Player dots
   for (const p of state.players) {

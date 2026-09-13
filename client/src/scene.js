@@ -590,7 +590,7 @@ export function createScene(canvas, audioSystem = null) {
       scene,
     );
     shadowDisc.rotation.x = Math.PI / 2;
-    shadowDisc.position.set(0, -0.34, 0);
+    shadowDisc.position.set(0, -0.465, 0);
     shadowDisc.scaling.set(0.72, 1.35, 1);
     shadowDisc.parent = root;
     const shadowMat = material("contactShadowMat_" + player.id, "#080c0d", 0);
@@ -1084,7 +1084,9 @@ export function createScene(canvas, audioSystem = null) {
     const label = document.createElement("div");
     label.className = "driver-label";
     label.innerHTML = `<span class="driver-tag-pip"></span><span class="driver-tag-pos"></span><span class="driver-tag-name"></span>`;
-    label.querySelector(".driver-tag-name").textContent = player.name;
+    const posEl = label.querySelector(".driver-tag-pos");
+    const nameEl = label.querySelector(".driver-tag-name");
+    nameEl.textContent = player.name;
     label.style.setProperty("--driver-color", player.color);
     document.body.append(label);
 
@@ -1093,6 +1095,10 @@ export function createScene(canvas, audioSystem = null) {
       chassis,
       wheels,
       label,
+      posEl,
+      nameEl,
+      lastPos: 0,
+      lastName: player.name,
       brakeLights,
       brakeDiscs,
       brakeHeat: 0,
@@ -1143,11 +1149,13 @@ export function createScene(canvas, audioSystem = null) {
     for (const t of targets) {
       const c = cars.get(t.id);
       if (!c) continue;
-      if (
-        !c.target ||
-        c.target.respawn !== t.respawn ||
-        (currentPhase !== state.phase && state.phase === "countdown")
-      ) {
+      const phaseReset =
+        currentPhase !== state.phase &&
+        (state.phase === "countdown" || state.phase === "lobby");
+      const distJump =
+        c.samples.length > 0 &&
+        Math.hypot(c.samples.at(-1).x - t.x, c.samples.at(-1).z - t.z) > 18;
+      if (!c.target || c.target.respawn !== t.respawn || phaseReset || distJump) {
         c.samples = [];
         c.root.position.set(t.x, t.y, t.z);
         c.root.rotation.y = t.yaw;
@@ -1203,7 +1211,9 @@ export function createScene(canvas, audioSystem = null) {
       }
       if (c.samples.length && at - c.samples.at(-1).at > 250)
         c.recovery = { x: c.root.position.x - t.x, z: c.root.position.z - t.z };
-      c.samples.push({ ...t, at });
+      const lastAt = c.samples.length ? c.samples.at(-1).at : -Infinity;
+      const safeAt = Math.max(lastAt + 1, at);
+      c.samples.push({ ...t, at: safeAt });
       if (c.samples.length > 12) c.samples.shift();
       c.target = t;
     }
@@ -1249,11 +1259,20 @@ export function createScene(canvas, audioSystem = null) {
       const c = cars.get(carTarget.id);
       const p = state.players.find((pl) => pl.id === carTarget.id);
       if (c && p) {
-        c.label.querySelector(".driver-tag-pos").textContent = `P${i + 1}`;
-        c.label.querySelector(".driver-tag-name").textContent = p.name;
+        if (c.lastPos !== i + 1) {
+          c.posEl.textContent = `P${i + 1}`;
+          c.lastPos = i + 1;
+        }
+        if (c.lastName !== p.name) {
+          c.nameEl.textContent = p.name;
+          c.lastName = p.name;
+        }
       }
     }
   }
+
+  const scratchAnchor = new Vector3();
+  const identityMatrix = Matrix.Identity();
 
   engine.runRenderLoop(() => {
     const now = performance.now(),
@@ -1292,7 +1311,7 @@ export function createScene(canvas, audioSystem = null) {
     // Vehicle updates & visual dynamics
     for (const c of cars.values()) {
       const t = c.target;
-      if (!t) continue;
+      if (!t || !c.samples || c.samples.length === 0) continue;
       const isMine = c.root.name === me;
       const alpha = 1 - Math.exp(-22 * dt);
 
@@ -1430,13 +1449,15 @@ export function createScene(canvas, audioSystem = null) {
         currentPhase === "racing" &&
         t.finished === null
       ) {
-        audioSystem.updateRemoteCar(
-          c.root.name,
-          c.root.position,
-          camera.position,
-          t.speed || 0,
-          !!t.throttle,
-        );
+        try {
+          audioSystem.updateRemoteCar(
+            c.root.name,
+            c.root.position,
+            camera.position,
+            t.speed || 0,
+            !!t.throttle,
+          );
+        } catch {}
       } else if (!isMine) audioSystem?.removeRemoteCar(c.root.name);
 
       // Active brake lights and glowing carbon discs
@@ -1589,27 +1610,43 @@ export function createScene(canvas, audioSystem = null) {
       engine.getRenderWidth(),
       engine.getRenderHeight(),
     );
+    const camTarget = camera.getTarget();
+    const camForwardX = camTarget.x - camera.position.x;
+    const camForwardZ = camTarget.z - camera.position.z;
+    const camForwardLen = Math.hypot(camForwardX, camForwardZ) || 1;
+    const normForwardX = camForwardX / camForwardLen;
+    const normForwardZ = camForwardZ / camForwardLen;
+    const transformMatrix = scene.getTransformMatrix();
 
     for (const c of [...cars.values()].sort(
       (a, b) =>
         Vector3.DistanceSquared(a.root.position, camera.position) -
         Vector3.DistanceSquared(b.root.position, camera.position),
     )) {
-      const anchor = c.root.position.add(new Vector3(0, 2.65, 0));
+      const isMine = c.root.name === me;
+      if (!racing || currentPhase === "results" || isMine) {
+        c.label.hidden = true;
+        continue;
+      }
+      const toCarX = c.root.position.x - camera.position.x;
+      const toCarZ = c.root.position.z - camera.position.z;
+      const dotForward = toCarX * normForwardX + toCarZ * normForwardZ;
+      if (dotForward < 1.0) {
+        c.label.hidden = true;
+        continue;
+      }
+
+      scratchAnchor.set(c.root.position.x, c.root.position.y + 2.65, c.root.position.z);
       const projected = Vector3.Project(
-        anchor,
-        Matrix.Identity(),
-        scene.getTransformMatrix(),
+        scratchAnchor,
+        identityMatrix,
+        transformMatrix,
         viewport,
       );
-      const distance = Vector3.Distance(anchor, camera.position);
+      const distance = Vector3.Distance(scratchAnchor, camera.position);
       const x = (projected.x / engine.getRenderWidth()) * innerWidth,
         y = (projected.y / engine.getRenderHeight()) * innerHeight;
-      const isMine = c.root.name === me;
       const hidden =
-        !racing ||
-        currentPhase === "results" ||
-        isMine ||
         projected.z < 0 ||
         projected.z > 1 ||
         distance < 4.5 ||
