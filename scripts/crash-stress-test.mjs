@@ -1,4 +1,4 @@
-﻿import { chromium } from "@playwright/test";
+import { chromium } from "@playwright/test";
 import assert from "node:assert/strict";
 import { createGame } from "../server/index.js";
 
@@ -21,12 +21,15 @@ const browser = await chromium.launch({
   ],
 });
 
-const context = await browser.newContext({
+const context1 = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+});
+const context2 = await browser.newContext({
   viewport: { width: 1440, height: 900 },
 });
 
-const p1 = await context.newPage();
-const p2 = await context.newPage();
+const p1 = await context1.newPage();
+const p2 = await context2.newPage();
 const errors = [];
 
 for (const [name, p] of [["P1", p1], ["P2", p2]]) {
@@ -79,16 +82,16 @@ try {
   await p2.waitForFunction(() => window.__getState()?.phase === "racing");
 
   console.log("TEST 1: Accelerating to Maximum Speed (> 140 km/h)...");
-  await p1.bringToFront();
-  await p1.evaluate(() => window.focus());
-  await p1.keyboard.down("w");
-
   await p2.bringToFront();
   await p2.evaluate(() => window.focus());
   await p2.keyboard.down("w");
 
-  // Drive at max speed for 2.5 seconds
-  await p1.waitForTimeout(2500);
+  await p1.bringToFront();
+  await p1.evaluate(() => window.focus());
+  await p1.keyboard.down("w");
+
+  // Drive at max speed for 3.5 seconds
+  await p1.waitForTimeout(3500);
 
   const speed1 = Number(await p1.locator("#speed").textContent());
   assert.ok(speed1 > 120, `Driver 1 should reach high speed, got ${speed1} km/h`);
@@ -217,7 +220,7 @@ try {
   await p1.waitForFunction(() => window.__getState()?.players.length === 1);
   console.log("Player 2 disconnected; room updated to 1 player.");
 
-  const p2New = await context.newPage();
+  const p2New = await context2.newPage();
   p2New.on("pageerror", (e) => errors.push(`P2New PageError: ${e.message}`));
   p2New.on("console", (msg) => {
     if (msg.type() === "error") errors.push(`P2New ConsoleError: ${msg.text()}`);

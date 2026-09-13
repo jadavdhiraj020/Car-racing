@@ -422,7 +422,6 @@ window.addEventListener("keyup", (e) => {
 
 window.addEventListener("blur", () => {
   for (const k in keys) keys[k] = false;
-  sendInput(true);
 });
 
 document.addEventListener("visibilitychange", () => {

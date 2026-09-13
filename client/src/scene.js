@@ -1192,32 +1192,30 @@ export function createScene(canvas, audioSystem = null) {
             };
           predict(motion, command, Math.min(1 / 60, horizon - elapsed));
         }
-        if (c.prediction && c.predBlend > 0.5) {
+        if (c.prediction) {
           const age = Math.min(
             0.05,
             Math.max(0, (performance.now() - c.predictedAt) / 1000),
           );
-          const x =
-            c.prediction.x +
-            c.prediction.vx * age +
-            (c.reconcile?.x || 0) -
-            motion.x;
-          const z =
-            c.prediction.z +
-            c.prediction.vz * age +
-            (c.reconcile?.z || 0) -
-            motion.z;
-          const errDist = Math.hypot(x, z);
-          if (errDist < 0.025) {
-            c.reconcile = null;
-          } else if (errDist < 2.5) {
-            c.reconcile = { x, z };
-          } else {
+          const currentPredX = c.prediction.x + (c.prediction.vx || 0) * age;
+          const currentPredZ = c.prediction.z + (c.prediction.vz || 0) * age;
+          const errX = currentPredX - motion.x;
+          const errZ = currentPredZ - motion.z;
+          const errDist = Math.hypot(errX, errZ);
+          if (errDist > 3.5 || (t.impact || 0) > 0.35) {
             c.prediction = motion;
             c.reconcile = null;
+          } else if (errDist > 0.025) {
+            c.reconcile = { x: errX, z: errZ };
+            c.prediction = motion;
+          } else {
+            c.reconcile = null;
+            c.prediction = motion;
           }
+        } else {
+          c.prediction = motion;
+          c.reconcile = null;
         }
-        c.prediction = motion;
         c.predictedAt = performance.now();
       }
       if (c.samples.length && at - c.samples.at(-1).at > 250)
@@ -1417,76 +1415,52 @@ export function createScene(canvas, audioSystem = null) {
         Math.cos(right.yaw - left.yaw),
       );
       const smoothYawT = tNorm;
-      const targetYaw = left.yaw + yawDiff * smoothYawT;
-
-      const sinceLatest = Math.max(
-        0,
-        Math.min(0.08, (renderAt - right.at) / 1000),
-      );
-      const nearContact = targets.some(
-        (other) =>
-          other.id !== t.id && Math.hypot(other.x - t.x, other.z - t.z) < 13,
-      );
-      if (sinceLatest > 0 && !nearContact && !(t.impact > 0.03)) {
-        const ahead = {
-          x: targetPosX + (right.vx || 0) * sinceLatest,
-          z: targetPosZ + (right.vz || 0) * sinceLatest,
-        };
-        if (nearest(ahead.x, ahead.z).distance < TRACK.width / 2 - 2) {
-          targetPosX = ahead.x;
-          targetPosZ = ahead.z;
-        }
-      }
-      const hasImpact = (t.impact || 0) > 0.03 || (left.impact || 0) > 0.03 || (right.impact || 0) > 0.03;
-      const canPredict =
+      let displayYaw;
+      if (
         isMine &&
         currentPhase === "racing" &&
         t.finished === null &&
         !localInput.reset &&
-        !nearContact &&
-        !hasImpact &&
-        now - c.samples.at(-1).at < 180 &&
-        nearest(t.x, t.z).distance < TRACK.width / 2 - 3;
-      if (hasImpact) c.predBlend = 0;
-      c.predBlend =
-        (c.predBlend || 0) +
-        ((canPredict ? 1 : 0) - (c.predBlend || 0)) * (1 - Math.exp(-18 * dt));
-      if (canPredict && c.prediction) {
-        const predictionDt = Math.min(
+        c.prediction
+      ) {
+        // Zero-latency client prediction for local player
+        const predDt = Math.min(
           0.05,
-          Math.max(0, (now - c.predictedAt) / 1000),
+          Math.max(0.001, (now - c.predictedAt) / 1000),
         );
-        for (let step = 0; step < predictionDt; step += 1 / 60)
-          predict(
-            c.prediction,
-            localInput,
-            Math.min(1 / 60, predictionDt - step),
-          );
-        if (
-          nearest(c.prediction.x, c.prediction.z).distance >
-          TRACK.width / 2 - 2
-        ) {
-          c.prediction = { ...t };
-          c.predBlend = 0;
+        predict(c.prediction, localInput, predDt);
+        c.predictedAt = now;
+
+        if (c.reconcile) {
+          c.reconcile.x *= Math.exp(-12 * dt);
+          c.reconcile.z *= Math.exp(-12 * dt);
         }
+
+        targetPosX = c.prediction.x + (c.reconcile?.x || 0);
+        targetPosY = t.y;
+        targetPosZ = c.prediction.z + (c.reconcile?.z || 0);
+        displayYaw = c.prediction.yaw;
+      } else {
+        // Butter-smooth interpolation for remote cars across packets
+        const yawDiff = Math.atan2(
+          Math.sin(right.yaw - left.yaw),
+          Math.cos(right.yaw - left.yaw),
+        );
+        targetYaw = left.yaw + yawDiff * tNorm;
+
+        if (sinceLatest > 0 && !(t.impact > 0.05)) {
+          const ahead = {
+            x: targetPosX + (right.vx || 0) * sinceLatest,
+            z: targetPosZ + (right.vz || 0) * sinceLatest,
+          };
+          if (nearest(ahead.x, ahead.z).distance < TRACK.width / 2 - 1.5) {
+            targetPosX = ahead.x;
+            targetPosZ = ahead.z;
+          }
+        }
+        displayYaw = targetYaw;
       }
-      c.predictedAt = now;
-      if (c.reconcile) {
-        c.reconcile.x *= Math.exp(-14 * dt);
-        c.reconcile.z *= Math.exp(-14 * dt);
-        targetPosX += c.reconcile.x * c.predBlend;
-        targetPosZ += c.reconcile.z * c.predBlend;
-      }
-      let displayYaw = targetYaw;
-      if (isMine && c.prediction) {
-        targetPosX += (c.prediction.x - targetPosX) * c.predBlend;
-        targetPosZ += (c.prediction.z - targetPosZ) * c.predBlend;
-        displayYaw +=
-          Math.atan2(
-            Math.sin(c.prediction.yaw - targetYaw),
-            Math.cos(c.prediction.yaw - targetYaw),
-          ) * c.predBlend;
-      }
+
       if (c.recovery) {
         c.recovery.x *= Math.exp(-12 * dt);
         c.recovery.z *= Math.exp(-12 * dt);
@@ -1586,55 +1560,38 @@ export function createScene(canvas, audioSystem = null) {
       }
     }
 
-    // Resolve tiny interpolation penetrations and emit contact sparks
+    // Emit contact sparks on physical car-to-car touch without jittering mesh coordinates
     const visible = [...cars.values()];
-    for (let pass = 0; pass < 3; pass++) {
-      for (let i = 0; i < visible.length; i++) {
-        for (let j = i + 1; j < visible.length; j++) {
-          const a = visible[i].root,
-            b = visible[j].root,
-            hit = overlap(
-              { x: a.position.x, z: a.position.z, yaw: a.rotation.y },
-              { x: b.position.x, z: b.position.z, yaw: b.rotation.y },
-            );
-          if (hit) {
-            const correction = (hit.depth + 0.002) * 0.5;
-            a.position.x -= hit.x * correction;
-            a.position.z -= hit.z * correction;
-            b.position.x += hit.x * correction;
-            b.position.z += hit.z * correction;
-            if (pass === 0 && Math.random() < 0.25) {
-              emitSparks(
-                (a.position.x + b.position.x) * 0.5,
-                0.3,
-                (a.position.z + b.position.z) * 0.5,
-                6,
-                0.8,
-              );
-            }
-          }
+    for (let i = 0; i < visible.length; i++) {
+      for (let j = i + 1; j < visible.length; j++) {
+        const a = visible[i].root,
+          b = visible[j].root,
+          hit = overlap(
+            { x: a.position.x, z: a.position.z, yaw: a.rotation.y },
+            { x: b.position.x, z: b.position.z, yaw: b.rotation.y },
+          );
+        if (hit && Math.random() < 0.25) {
+          emitSparks(
+            (a.position.x + b.position.x) * 0.5,
+            0.3,
+            (a.position.z + b.position.z) * 0.5,
+            6,
+            0.8,
+          );
         }
       }
     }
 
-    // Dynamic Chase Camera with look-ahead, speed FOV & collision shake
+    // Dynamic Chase Camera with look-ahead and speed FOV (ultra-stable 1fc22f6 geometry)
     const mine = cars.get(me);
     if (racing && mine && mine.target) {
       const p = mine.root.position,
         yaw = mine.root.rotation.y,
         speed = Number.isFinite(mine.target.speed) ? Math.max(0, mine.target.speed) : 0;
 
-      // Screen shake impulse on impact
-      const safeImpact = Number.isFinite(mine.target.impact) ? mine.target.impact : 0;
-      if (safeImpact > (mine.cameraImpact || 0) + 0.06)
-        camShake = Math.min(0.12, safeImpact * 0.08);
-      mine.cameraImpact = safeImpact;
-      camShake *= Math.exp(-9 * dt);
-      if (!Number.isFinite(camShake)) camShake = 0;
-
-      // Smooth chase camera distance and height
-      const camDist = 10.6 + Math.min(1.8, speed * 0.035);
-      const camHeight = 4.2 + Math.min(0.6, speed * 0.012);
+      // Smooth chase camera distance and height inspired by the solid 1fc22f6 feel
+      const camDist = 13.5 + Math.min(2.5, speed * 0.04);
+      const camHeight = 5.2 + Math.min(0.8, speed * 0.02);
 
       const px = Number.isFinite(p.x) ? p.x : 120;
       const py = Number.isFinite(p.y) ? p.y : 0.55;
@@ -1642,29 +1599,19 @@ export function createScene(canvas, audioSystem = null) {
       const safeYaw = Number.isFinite(yaw) ? yaw : 0;
 
       const desired = new Vector3(
-        px - Math.sin(safeYaw) * camDist + (Math.random() - 0.5) * camShake,
-        py + camHeight + (Math.random() - 0.5) * camShake,
-        pz - Math.cos(safeYaw) * camDist + (Math.random() - 0.5) * camShake,
+        px - Math.sin(safeYaw) * camDist,
+        py + camHeight,
+        pz - Math.cos(safeYaw) * camDist,
       );
 
-      // 2nd-order critically damped spring camera follow (eliminates high-speed lag & barrier clipping)
-      const omega = 9.0;
-      const dispX = desired.x - camera.position.x;
-      const dispY = desired.y - camera.position.y;
-      const dispZ = desired.z - camera.position.z;
+      const prevCamX = camera.position.x;
+      const prevCamZ = camera.position.z;
 
-      if (Math.hypot(dispX, dispZ) > 30) {
-        camera.position.copyFrom(desired);
-        cameraVel.set(0, 0, 0);
-      } else {
-        cameraVel.x += (omega * omega * dispX - 2 * omega * cameraVel.x) * dt;
-        cameraVel.y += (omega * omega * dispY - 2 * omega * cameraVel.y) * dt;
-        cameraVel.z += (omega * omega * dispZ - 2 * omega * cameraVel.z) * dt;
-
-        camera.position.x += cameraVel.x * dt;
-        camera.position.y += cameraVel.y * dt;
-        camera.position.z += cameraVel.z * dt;
-      }
+      camera.position = Vector3.Lerp(
+        camera.position,
+        desired,
+        1 - Math.exp(-8 * dt),
+      );
 
       // Validate camera.position sanity
       if (
@@ -1673,11 +1620,13 @@ export function createScene(canvas, audioSystem = null) {
         !Number.isFinite(camera.position.z)
       ) {
         camera.position.copyFrom(desired);
-        cameraVel.set(0, 0, 0);
       }
 
+      cameraVel.x = (camera.position.x - prevCamX) / dt;
+      cameraVel.z = (camera.position.z - prevCamZ) / dt;
+
       // Look-ahead target anticipates corners
-      const lookDist = 7.5 + Math.min(5.5, speed * 0.12);
+      const lookDist = 7.5 + Math.min(5.0, speed * 0.1);
       const lookTarget = new Vector3(
         px + Math.sin(safeYaw) * lookDist,
         py + 1.25,
@@ -1688,7 +1637,7 @@ export function createScene(canvas, audioSystem = null) {
       }
 
       // Speed FOV expansion (intense tunnel vision at top speed, clamped safely)
-      const targetFov = 0.82 + Math.min(0.14, (speed / 50) * 0.14);
+      const targetFov = 0.82 + Math.min(0.12, (speed / 50) * 0.12);
       camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-6 * dt));
       camera.fov = Math.max(
         0.7,

@@ -21,12 +21,15 @@ const browser = await chromium.launch({
   ],
 });
 
-const context = await browser.newContext({
+const context1 = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+});
+const context2 = await browser.newContext({
   viewport: { width: 1440, height: 900 },
 });
 
-const p1 = await context.newPage();
-const p2 = await context.newPage();
+const p1 = await context1.newPage();
+const p2 = await context2.newPage();
 const errors = [];
 
 for (const p of [p1, p2]) {
