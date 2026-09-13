@@ -1,5 +1,6 @@
 import * as C from "cannon-es";
 import { TRACK, LENGTH, point, nearest, gates } from "../shared/track.js";
+
 export class Race {
   constructor() {
     this.world = new C.World({ gravity: new C.Vec3(0, -18, 0) });
@@ -58,8 +59,8 @@ export class Race {
     this.cars.delete(id);
   }
   reset(c, grid = false, index = 0) {
-    const s = grid ? -7 - Math.floor(index / 2) * 6 : (c.passed * LENGTH) / 24;
-    const p = point(s, grid ? (index % 2 ? 2.5 : -2.5) : 0);
+    const s = grid ? -8 - Math.floor(index / 2) * 7 : (c.passed * LENGTH) / 24;
+    const p = point(s, grid ? (index % 2 ? 3 : -3) : 0);
     c.b.position.set(p.x, 0.55, p.z);
     c.b.velocity.setZero();
     c.b.angularVelocity.setZero();
@@ -79,19 +80,43 @@ export class Race {
         v = c.b.velocity;
       let speed = v.x * f.x + v.z * f.z;
       const lateral = v.x * f.z - v.z * f.x;
-      c.steer = (input.left ? -1 : 0) + (input.right ? 1 : 0);
-      let throttle = (input.up ? 1 : 0) - (input.down ? 1 : 0);
-      speed += throttle * (throttle * speed < 0 ? 38 : 22) * dt;
-      speed *= Math.exp(-(input.drift ? 0.6 : 0.22) * dt);
-      speed = Math.max(-12, Math.min(48, speed));
+
+      // Smooth, progressive steering response (eliminates jerky keyboard snaps)
+      const targetSteer = (input.left ? -1 : 0) + (input.right ? 1 : 0);
+      c.steer += (targetSteer - c.steer) * (1 - Math.exp(-14 * dt));
+
+      // Acceleration and Braking
+      if (input.up) {
+        const punch = 26 - Math.max(0, speed / 50) * 10;
+        speed += punch * dt;
+      } else if (input.down) {
+        if (speed > 1) speed -= 36 * dt; // Decisive braking
+        else speed -= 16 * dt; // Smooth reverse
+      } else {
+        speed *= Math.exp(-0.4 * dt); // Natural rolling drag
+      }
+
+      // Aerodynamic drag and speed clamping
+      speed *= Math.exp(-(input.drift ? 0.55 : 0.18) * dt);
+      speed = Math.max(-12, Math.min(50, speed));
       if (!running || c.finished) speed *= Math.exp(-8 * dt);
-      c.yaw +=
-        c.steer *
-        Math.sign(speed) *
-        Math.min(Math.abs(speed) / 12, 1) *
-        (input.drift ? 2.1 : 1.25) *
-        dt;
-      const slip = lateral * Math.exp(-(input.drift ? 1.8 : 9) * dt);
+
+      // Speed-sensitive steering: responsive at low speeds, stable at high speeds
+      const speedFactor = Math.min(Math.abs(speed) / 8, 1);
+      const stability = 1 / (1 + Math.max(0, (Math.abs(speed) - 15) / 35) ** 0.8);
+      const turnAuthority = input.drift ? 2.2 : 1.45 * stability;
+      c.yaw += c.steer * Math.sign(speed || 1) * speedFactor * turnAuthority * dt;
+
+      // Lateral tire grip / controlled drift slip
+      const slipDamping = input.drift ? 2.2 : 11;
+      const slip = lateral * Math.exp(-slipDamping * dt);
+
+      // Off-road grass friction (slight drag outside the asphalt road)
+      const distFromCenter = nearest(c.b.position.x, c.b.position.z).distance;
+      if (distFromCenter > TRACK.width / 2) {
+        speed *= Math.exp(-1.4 * dt);
+      }
+
       v.x = Math.sin(c.yaw) * speed + Math.cos(c.yaw) * slip;
       v.z = Math.cos(c.yaw) * speed - Math.sin(c.yaw) * slip;
       c.b.quaternion.setFromEuler(0, c.yaw, 0);
@@ -102,7 +127,7 @@ export class Race {
       if (running && !c.finished) this.progress(c, now, startAt);
       if (
         c.b.position.y < -5 ||
-        nearest(c.b.position.x, c.b.position.z).distance > 30
+        nearest(c.b.position.x, c.b.position.z).distance > 45
       )
         this.reset(c);
     }
@@ -118,7 +143,7 @@ export class Race {
     const across = Math.abs(
       (p.x - g.x) * Math.cos(g.yaw) - (p.z - g.z) * Math.sin(g.yaw),
     );
-    if (before <= 0 && after > 0 && across < TRACK.width / 2 + 1) {
+    if (before <= 0 && after > 0 && across < TRACK.width / 2 + 2) {
       c.passed++;
       if (c.passed === 24 * TRACK.laps) c.finished = now - startAt;
     }

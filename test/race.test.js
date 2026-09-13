@@ -5,17 +5,17 @@ import { Race } from "../server/race.js";
 import { createGame } from "../server/index.js";
 import { point, LENGTH, nearest } from "../shared/track.js";
 
-test("circuit has left/right turns, sharp bends, sweepers and a long straight", () => {
-  let left = false, right = false, sharp = false, wide = false, straight = 0, longest = 0;
+test("circuit has left/right turns, sweepers, gentle bends and a long straight", () => {
+  let left = false, right = false, sweepers = false, gentle = false, straight = 0, longest = 0;
   for(let s=0;s<LENGTH;s++) {
     const a=point(s),b=point(s+1);
     const turn=Math.atan2(Math.sin(b.yaw-a.yaw),Math.cos(b.yaw-a.yaw));
     left ||= turn < -0.01; right ||= turn > 0.01;
-    sharp ||= Math.abs(turn)>0.055;
-    wide ||= Math.abs(turn)>0.015 && Math.abs(turn)<0.03;
+    sweepers ||= Math.abs(turn) > 0.015;
+    gentle ||= Math.abs(turn) > 0.005 && Math.abs(turn) <= 0.015;
     straight=Math.abs(turn)<0.001?straight+1:0;longest=Math.max(longest,straight);
   }
-  assert.ok(left && right && sharp && wide);assert.ok(longest>=60);
+  assert.ok(left && right && sweepers && gentle);assert.ok(longest>=80);
 });
 test("track is continuous and nearest recovers distance", () => {
   for (let s = 0; s < LENGTH; s += 0.7) {
@@ -49,7 +49,7 @@ test("server physics accelerates, brakes, reverses, collides and remains grounde
     now += 1000 / 60;
   }
   assert.ok(c.b.velocity.z < 0);
-  c.b.position.set(54, 0.55, 0);
+  c.b.position.set(126, 0.55, 0);
   c.yaw = Math.PI / 2;
   c.input = { up: true };
   for (let i = 0; i < 180; i++) {
@@ -57,7 +57,7 @@ test("server physics accelerates, brakes, reverses, collides and remains grounde
     r.step(1 / 60, now, true, 10000);
     now += 1000 / 60;
   }
-  assert.ok(c.b.position.x < 57.5, "barrier contains car");
+  assert.ok(c.b.position.x < 132, "barrier contains car");
 });
 test("checkpoints reject skips/backward crossings; 3 ordered laps finish", () => {
   const r = new Race(),
