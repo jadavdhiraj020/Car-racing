@@ -101,19 +101,19 @@ export class Race {
       let speed = v.x * f.x + v.z * f.z;
       const lateral = v.x * f.z - v.z * f.x;
 
-      // Smooth, progressive steering response (eliminates jerky keyboard snaps)
+      // Smooth, progressive steering response: snappy turn-in with zero twitch
       const targetSteer = (input.left ? -1 : 0) + (input.right ? 1 : 0);
-      c.steer += (targetSteer - c.steer) * (1 - Math.exp(-24 * dt));
+      c.steer += (targetSteer - c.steer) * (1 - Math.exp(-30 * dt));
 
       // Acceleration and Braking
       if (input.up) {
-        const punch = 26 - Math.max(0, speed / 50) * 10;
+        const punch = 27 - Math.max(0, speed / 50) * 11;
         speed += punch * dt;
       } else if (input.down) {
-        if (speed > 1) speed -= 36 * dt; // Decisive braking
-        else speed -= 16 * dt; // Smooth reverse
+        if (speed > 1) speed -= 38 * dt; // Decisive braking
+        else speed -= 18 * dt; // Smooth reverse
       } else {
-        speed *= Math.exp(-0.4 * dt); // Natural rolling drag
+        speed *= Math.exp(-0.45 * dt); // Natural rolling drag
       }
 
       // Aerodynamic drag and speed clamping
@@ -121,14 +121,14 @@ export class Race {
       speed = Math.max(-12, Math.min(50, speed));
       if (!running || c.finished) speed *= Math.exp(-8 * dt);
 
-      // Speed-sensitive steering: responsive at low speeds, stable at high speeds
-      const speedFactor = Math.min(Math.abs(speed) / 8, 1);
-      const stability = 1 / (1 + Math.max(0, Math.abs(speed) - 18) / 55);
-      const turnAuthority = input.drift ? 2.2 : 1.45 * stability;
+      // Speed-sensitive steering: agile at low/mid speeds, laser-stable on straights
+      const speedFactor = Math.max(0.35, Math.min(Math.abs(speed) / 7, 1));
+      const stability = 1 / (1 + Math.max(0, Math.abs(speed) - 16) / 52);
+      const turnAuthority = input.drift ? 2.25 : 1.52 * stability;
       c.yaw += c.steer * Math.sign(speed || 1) * speedFactor * turnAuthority * dt;
 
       // Lateral tire grip / controlled drift slip
-      const slipDamping = input.drift ? 2.2 : 11;
+      const slipDamping = input.drift ? 2.2 : 11.5;
       const slip = lateral * Math.exp(-slipDamping * dt);
 
       // Off-road grass friction (slight drag outside the asphalt road)
@@ -143,20 +143,41 @@ export class Race {
       c.previous = { x: c.b.position.x, z: c.b.position.z };
     }
     // Two substeps limit high-speed contact penetration and tunnelling.
-    this.world.step(dt/2);this.world.step(dt/2);
-    // The arcade heading controller can rotate a chassis into a neighbour.
-    // Project residual contact penetration and remove only closing normal velocity.
-    const bodies=[...this.cars.values()];
-    for(let pass=0;pass<6;pass++)for(let i=0;i<bodies.length;i++)for(let j=i+1;j<bodies.length;j++){
-      const a=bodies[i],b=bodies[j];
-      const hit=overlap({x:a.b.position.x,z:a.b.position.z,yaw:a.yaw},{x:b.b.position.x,z:b.b.position.z,yaw:b.yaw});
-      if(!hit)continue;
-      const correction=(hit.depth+.001)*.5;
-      a.b.position.x-=hit.x*correction;a.b.position.z-=hit.z*correction;
-      b.b.position.x+=hit.x*correction;b.b.position.z+=hit.z*correction;
-      a.b.aabbNeedsUpdate=b.b.aabbNeedsUpdate=true;
-      const closing=(b.b.velocity.x-a.b.velocity.x)*hit.x+(b.b.velocity.z-a.b.velocity.z)*hit.z;
-      if(closing<0){const impulse=-closing*.5;a.b.velocity.x-=hit.x*impulse;a.b.velocity.z-=hit.z*impulse;b.b.velocity.x+=hit.x*impulse;b.b.velocity.z+=hit.z*impulse;}
+    this.world.step(dt / 2);
+    this.world.step(dt / 2);
+
+    // Multi-pass contact resolution: prevents overlap and exchanges physical impulse
+    const bodies = [...this.cars.values()];
+    for (let pass = 0; pass < 6; pass++) {
+      for (let i = 0; i < bodies.length; i++) {
+        for (let j = i + 1; j < bodies.length; j++) {
+          const a = bodies[i], b = bodies[j];
+          const hit = overlap(
+            { x: a.b.position.x, z: a.b.position.z, yaw: a.yaw },
+            { x: b.b.position.x, z: b.b.position.z, yaw: b.yaw },
+            0.02
+          );
+          if (!hit) continue;
+          const correction = (hit.depth + 0.002) * 0.5;
+          a.b.position.x -= hit.x * correction;
+          a.b.position.z -= hit.z * correction;
+          b.b.position.x += hit.x * correction;
+          b.b.position.z += hit.z * correction;
+          a.b.aabbNeedsUpdate = b.b.aabbNeedsUpdate = true;
+
+          const closing = (b.b.velocity.x - a.b.velocity.x) * hit.x + (b.b.velocity.z - a.b.velocity.z) * hit.z;
+          if (closing < 0) {
+            const impulse = -closing * 0.6;
+            a.b.velocity.x -= hit.x * impulse;
+            a.b.velocity.z -= hit.z * impulse;
+            b.b.velocity.x += hit.x * impulse;
+            b.b.velocity.z += hit.z * impulse;
+            const impactMag = Math.min(1, Math.abs(closing) / 10 + hit.depth * 1.5);
+            a.impact = Math.max(a.impact, impactMag);
+            b.impact = Math.max(b.impact, impactMag);
+          }
+        }
+      }
     }
     for (const c of this.cars.values()) {
       if (running && !c.finished) this.progress(c, now, startAt);

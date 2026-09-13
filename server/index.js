@@ -187,6 +187,7 @@ export async function createGame({ dev = false } = {}) {
       clearInterval(interval);
       await vite?.close();
       await new Promise((resolve) => io.close(resolve));
+      await new Promise((resolve) => http.close(resolve));
     },
   };
 }

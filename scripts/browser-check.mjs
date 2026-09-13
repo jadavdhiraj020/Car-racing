@@ -14,6 +14,9 @@ const browser = await chromium.launch({
     "--enable-webgl",
     "--use-angle=swiftshader",
     "--enable-unsafe-swiftshader",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
   ],
 });
 
@@ -56,17 +59,24 @@ try {
   await a.locator("#players .player").filter({ hasText: "Rahul" }).waitFor();
   await a.locator("#start").click();
 
-  await a.locator("#countdown").filter({ hasText: /^[123]$/ }).waitFor();
-  await b.locator("#countdown").filter({ hasText: /^[123]$/ }).waitFor();
+  await Promise.all([
+    a.locator("#countdown").filter({ hasText: /^[123]$/ }).waitFor(),
+    b.locator("#countdown").filter({ hasText: /^[123]$/ }).waitFor(),
+  ]);
 
-  await a.waitForTimeout(3300);
+  await a.waitForFunction(() => window.__getState()?.phase === "racing");
+  await a.bringToFront();
+  await a.evaluate(() => window.focus());
   await a.keyboard.down("w");
   await a.waitForTimeout(1800);
   await a.keyboard.up("w");
   assert.ok(Number(await a.locator("#speed").textContent()) > 40);
 
   await a.screenshot({ path: "test-artifacts/race.png" });
+  await b.bringToFront();
   await b.screenshot({ path: "test-artifacts/remote.png" });
+  await a.bringToFront();
+  await a.evaluate(() => window.focus());
 
   await a.keyboard.down("d");
   await a.keyboard.down("w");
@@ -82,7 +92,9 @@ try {
   });
 
   await a.locator("#results").waitFor({ state: "visible" });
+  await b.bringToFront();
   await b.locator("#results").waitFor({ state: "visible" });
+  await a.bringToFront();
   assert.equal(
     await a.locator("#winner").textContent(),
     "Dhiraj takes the win.",
@@ -91,12 +103,16 @@ try {
 
   await a.locator("#rematch").click();
   await a.locator("#lobby").waitFor({ state: "visible" });
+  await b.bringToFront();
   await b.locator("#lobby").waitFor({ state: "visible" });
+  await a.bringToFront();
 
   await a.locator("#lobby .leave").click();
   await a.locator("#home").waitFor({ state: "visible" });
+  await b.bringToFront();
   await b.locator("#lobby .leave").click();
   await b.locator("#home").waitFor({ state: "visible" });
+  await a.bringToFront();
 
   await a.setViewportSize({ width: 390, height: 844 });
   await a.screenshot({ path: "test-artifacts/mobile.png" });

@@ -248,6 +248,21 @@ export function createScene(canvas) {
 
   sign("APEX GRAND PRIX", startP.x, 9, startP.z - 0.7, 24, 2.2, 0, 80);
 
+  // 5 Synchronized 3D Start Gantry Lights (Facing drivers on the grid)
+  const gantryBulbs = [];
+  const gantryOffMat = material("gantryOff", "#1a0404", 0.1);
+  const gantryRedMat = material("gantryRed", "#ff2222", 0.9, "#ff1818");
+  const gantryGreenMat = material("gantryGreen", "#22ff44", 0.9, "#16ff38");
+  for (let i = 0; i < 5; i++) {
+    const lx = startP.x + (i - 2) * 2.2;
+    box("gantry housing " + i, 1.3, 1.8, 0.45, lx, 7.3, startP.z - 0.65, dark);
+    const bulb = MeshBuilder.CreateCylinder("gantry bulb " + i, { diameter: 0.76, height: 0.14, tessellation: 16 }, scene);
+    bulb.rotation.x = Math.PI / 2;
+    bulb.position.set(lx, 7.3, startP.z - 0.88);
+    bulb.material = gantryOffMat;
+    gantryBulbs.push(bulb);
+  }
+
   // Checkpoint gates visual markers
   const gateMeshes = gates.map((p, i) => {
     const root = new TransformNode("checkpoint " + i, scene);
@@ -357,47 +372,174 @@ export function createScene(canvas) {
   }
 
   const cars = new Map();
-  const smokeMaterial=material("tire haze","#c5c9be",0);smokeMaterial.alpha=.22;
-  const smoke=Array.from({length:36},()=>{const mesh=MeshBuilder.CreateSphere("tire smoke",{diameter:1,segments:4},scene);mesh.material=smokeMaterial;mesh.setEnabled(false);return {mesh,life:0};});
-  let smokeCursor=0,smokeClock=0;
+
+  // High-performance soft tire smoke pool
+  const smokeMaterial = material("tire haze", "#d0d4cc", 0);
+  smokeMaterial.alpha = 0.24;
+  const smoke = Array.from({ length: 40 }, () => {
+    const mesh = MeshBuilder.CreateSphere("tire smoke", { diameter: 1, segments: 4 }, scene);
+    mesh.material = smokeMaterial;
+    mesh.setEnabled(false);
+    return { mesh, life: 0 };
+  });
+  let smokeCursor = 0, smokeClock = 0;
+
+  // Dynamic metallic collision/kerb spark particle pool
+  const sparkMaterial = material("spark", "#ffc83b", 0.9, "#ff8800");
+  const sparks = Array.from({ length: 48 }, () => {
+    const mesh = MeshBuilder.CreateBox("spark", { size: 0.08 }, scene);
+    mesh.material = sparkMaterial;
+    mesh.setEnabled(false);
+    return { mesh, life: 0, vx: 0, vy: 0, vz: 0 };
+  });
+  let sparkCursor = 0;
+
+  function emitSparks(x, y, z, count = 8, scale = 1) {
+    for (let i = 0; i < count; i++) {
+      const s = sparks[sparkCursor++ % sparks.length];
+      s.life = 0.28 + Math.random() * 0.32;
+      s.mesh.position.set(
+        x + (Math.random() - 0.5) * 0.4,
+        y + Math.random() * 0.25,
+        z + (Math.random() - 0.5) * 0.4,
+      );
+      s.vx = (Math.random() - 0.5) * 12 * scale;
+      s.vy = (1.8 + Math.random() * 5.2) * scale;
+      s.vz = (Math.random() - 0.5) * 12 * scale;
+      s.mesh.setEnabled(true);
+    }
+  }
+
+  // Common high-performance materials for vehicles
+  const headlightGlow = material("headlightGlow", "#ffffff", 0.95, "#e6ffa8");
+  const taillightGlow = material("taillightGlow", "#ff2222", 0.8, "#ff0505");
+  const cockpitInterior = material("cockpitInterior", "#0e1418", 0.1);
+  const brakeDiscCold = material("brakeDiscCold", "#2b2f33", 0.45);
+  const brakeDiscHot = material("brakeDiscHot", "#ff4500", 0.95, "#ff3300");
+  const tireStripe = material("tireStripe", "#e6382a", 0.2, "#881510");
+  const visorMat = material("visorGlass", "#0f171c", 0.95);
 
   function car(player) {
     const root = new TransformNode(player.id, scene),
       chassis = new TransformNode(player.id + "_chassis", scene);
     chassis.parent = root;
 
-    const paint = finish(player.id, player.color);
+    const paint = finish(player.id, player.color, 0.72, 0.16);
+    const helmetPaint = finish("helmet_" + player.id, player.color, 0.55, 0.22);
 
     // Lofted body shells: tapered nose, shoulder lines and rear haunches.
-    function shell(name,sections,m){
-      const rings=sections.map(([z,w,bottom,top])=>[
-        new Vector3(-w*.8,bottom,z),new Vector3(-w,top-.12,z),new Vector3(-w*.72,top,z),
-        new Vector3(w*.72,top,z),new Vector3(w,top-.12,z),new Vector3(w*.8,bottom,z)
+    function shell(name, sections, m) {
+      const rings = sections.map(([z, w, bottom, top]) => [
+        new Vector3(-w * 0.8, bottom, z),
+        new Vector3(-w, top - 0.12, z),
+        new Vector3(-w * 0.72, top, z),
+        new Vector3(w * 0.72, top, z),
+        new Vector3(w, top - 0.12, z),
+        new Vector3(w * 0.8, bottom, z),
       ]);
-      const mesh=MeshBuilder.CreateRibbon(name,{pathArray:rings,closePath:true,sideOrientation:2},scene);mesh.parent=chassis;mesh.material=m;return mesh;
+      const mesh = MeshBuilder.CreateRibbon(
+        name,
+        { pathArray: rings, closePath: true, sideOrientation: 2 },
+        scene,
+      );
+      mesh.parent = chassis;
+      mesh.material = m;
+      return mesh;
     }
-    const body=shell("sculpted monocoque",[[-2.02,.88,.03,.42],[-1.4,1.03,.04,.64],[-.55,1,.04,.65],[.5,.96,.04,.53],[1.55,.95,.04,.40],[2.05,.77,.10,.28]],paint);
-    shell("wraparound windshield",[[-1.05,.66,.52,.80],[-.65,.66,.55,1.10],[.15,.62,.51,1.06],[.85,.65,.45,.52]],glass);
-    shell("canopy roof",[[-.72,.64,1.06,1.12],[.12,.61,1.04,1.1]],paint);
-    box("racing stripe",.22,.012,1.1,0,.54,1.0,cream,0,chassis);
-    box("front splitter",2.25,.09,.52,0,.04,1.94,carbon,0,chassis);
-    box("rear diffuser",1.95,.12,.5,0,.02,-1.98,carbon,0,chassis);
-    box("rear wing",2.35,.09,.48,0,.98,-1.82,carbon,0,chassis);
-    for(const x of [-1.16,1.16])box("wing endplate",.055,.30,.56,x,.98,-1.82,paint,0,chassis);
-    for(const x of [-.70,.70]){
-      box("wing pylon",.06,.42,.13,x,.72,-1.82,chrome,0,chassis);
-      box("LED headlight",.45,.045,.09,x,.36,2.0,cream,0,chassis);
-      box("rear LED",.48,.05,.08,x,.40,-2.03,red,0,chassis);
-      box("front intake",.42,.16,.07,x,.19,2.05,carbon,0,chassis);
-      box("mirror",.20,.11,.24,x*1.49,.79,.20,paint,0,chassis);
-      box("side skirt",.08,.14,2.25,x*1.48,.08,0,carbon,0,chassis);
-      for(let i=0;i<4;i++)box("engine louvers",.36,.022,.045,x,.67,-.82-i*.12,carbon,0,chassis);
-    }
-    const brakeLights=[];
-    for(const x of [-.68,.68])brakeLights.push(box("brake glow",.45,.06,.02,x,.40,-2.075,lime,0,chassis));
+
+    // 1. Aerodynamic sculpted monocoque chassis
+    const body = shell("monocoque", [
+      [-2.12, 0.88, 0.03, 0.42],
+      [-1.45, 1.04, 0.04, 0.63],
+      [-0.55, 1.01, 0.04, 0.65],
+      [0.48, 0.97, 0.04, 0.53],
+      [1.52, 0.93, 0.04, 0.39],
+      [2.08, 0.75, 0.09, 0.27],
+    ], paint);
     if (shadowGen) shadowGen.addShadowCaster(body);
 
+    // 2. Front Wing Assembly (multi-tier aerodynamic wing with endplates & canards)
+    box("front splitter", 2.36, 0.065, 0.56, 0, 0.05, 2.0, carbon, 0, chassis);
+    box("front wing flap", 2.22, 0.038, 0.34, 0, 0.14, 1.94, paint, 0, chassis);
+    for (const x of [-1.18, 1.18]) {
+      box("front endplate", 0.05, 0.26, 0.62, x, 0.15, 1.98, carbon, 0, chassis);
+      box("front canard", 0.22, 0.025, 0.18, x - Math.sign(x) * 0.09, 0.23, 1.92, carbon, 0, chassis);
+    }
+    box("nose camera pod", 0.12, 0.09, 0.22, 0, 0.39, 1.62, dark, 0, chassis);
+
+    // 3. Cockpit, Driver & F1 Safety Halo
+    box("cockpit tub", 0.84, 0.18, 1.05, 0, 0.46, 0.05, cockpitInterior, 0, chassis);
+    shell("windscreen visor", [
+      [-1.02, 0.65, 0.52, 0.79],
+      [-0.62, 0.65, 0.55, 1.05],
+      [0.18, 0.62, 0.51, 1.02],
+      [0.85, 0.64, 0.44, 0.51],
+    ], glass);
+
+    // F1 Safety Halo
+    box("halo pillar", 0.055, 0.38, 0.07, 0, 0.72, 0.48, carbon, 0, chassis);
+    box("halo arch", 0.78, 0.065, 0.74, 0, 0.91, 0.14, carbon, 0, chassis);
+
+    // 3D Driver Helmet inside cockpit
+    const helmet = MeshBuilder.CreateSphere("helmet", { diameter: 0.36, segments: 10 }, scene);
+    helmet.position.set(0, 0.71, 0.08);
+    helmet.parent = chassis;
+    helmet.material = helmetPaint;
+
+    const helmetVisor = MeshBuilder.CreateBox("helmet visor", { width: 0.26, height: 0.10, depth: 0.16 }, scene);
+    helmetVisor.position.set(0, 0.72, 0.21);
+    helmetVisor.parent = chassis;
+    helmetVisor.material = visorMat;
+
+    // Overhead engine airbox intake scoop & spine shark fin
+    box("airbox scoop", 0.36, 0.22, 0.62, 0, 0.94, -0.16, paint, 0, chassis);
+    box("shark fin", 0.045, 0.46, 1.45, 0, 0.81, -0.84, carbon, 0, chassis);
+
+    // 4. Sidepods, Cooling Inlets & Aero Skirts
+    for (const x of [-0.76, 0.76]) {
+      box("sidepod body", 0.44, 0.35, 1.4, x, 0.26, 0.12, paint, 0, chassis);
+      box("radiator duct", 0.36, 0.26, 0.08, x, 0.28, 0.82, cockpitInterior, 0, chassis);
+      box("side skirt", 0.08, 0.08, 2.3, x * 1.38, 0.05, 0, carbon, 0, chassis);
+      box("mirror stem", 0.035, 0.16, 0.035, x * 0.92, 0.68, 0.32, carbon, 0, chassis);
+      box("mirror body", 0.18, 0.09, 0.15, x * 1.06, 0.75, 0.32, paint, 0, chassis);
+      box("engine louver", 0.34, 0.02, 0.48, x, 0.62, -0.92, carbon, 0, chassis);
+      box("headlight", 0.38, 0.055, 0.09, x, 0.35, 1.96, headlightGlow, 0, chassis);
+    }
+
+    // 5. Rear Wing, Diffuser & Dual Exhausts
+    box("rear wing main", 2.36, 0.08, 0.52, 0, 1.05, -1.86, carbon, 0, chassis);
+    box("rear wing flap", 2.24, 0.045, 0.28, 0, 1.15, -1.82, paint, 0, chassis);
+    box("drs actuator", 0.12, 0.09, 0.18, 0, 1.12, -1.82, chrome, 0, chassis);
+    for (const x of [-1.18, 1.18]) {
+      box("rear endplate", 0.05, 0.52, 0.62, x, 1.02, -1.86, carbon, 0, chassis);
+    }
+    for (const x of [-0.42, 0.42]) {
+      box("swan neck pylon", 0.05, 0.52, 0.16, x, 0.81, -1.82, chrome, 0, chassis);
+    }
+
+    // Underbody diffuser & strakes
+    box("rear diffuser", 1.96, 0.11, 0.62, 0, 0.05, -1.98, carbon, 0, chassis);
+    for (const x of [-0.58, -0.2, 0.2, 0.58]) {
+      box("diffuser strake", 0.035, 0.15, 0.52, x, 0.08, -1.98, carbon, 0, chassis);
+    }
+
+    // Dual central exhausts
+    for (const x of [-0.14, 0.14]) {
+      box("exhaust pipe", 0.11, 0.11, 0.22, x, 0.38, -2.05, metal, 0, chassis);
+    }
+
+    // Flashing rear FIA rain / brake light
+    const brakeLights = [
+      box("fia rain light", 0.24, 0.12, 0.05, 0, 0.24, -2.08, taillightGlow, 0, chassis),
+    ];
+    for (const x of [-0.68, 0.68]) {
+      brakeLights.push(box("rear brake led", 0.42, 0.06, 0.05, x, 0.41, -2.06, taillightGlow, 0, chassis));
+    }
+
+    // 6. Forged Alloy Wheels with glowing carbon-ceramic brake discs
     const wheels = [];
+    const brakeDiscs = [];
+
     for (const x of [-1.05, 1.05]) {
       for (const z of [-1.2, 1.2]) {
         const pivot = new TransformNode("wheel pivot", scene);
@@ -407,37 +549,95 @@ export function createScene(canvas) {
         const axle = new TransformNode("spinning axle", scene);
         axle.parent = pivot;
 
+        // Tire tread
         const wheel = MeshBuilder.CreateCylinder(
           "wheel",
-          { diameter: 0.76, height: 0.38, tessellation: 14 },
+          { diameter: 0.76, height: 0.38, tessellation: 16 },
           scene,
         );
         wheel.rotation.z = Math.PI / 2;
         wheel.parent = axle;
         wheel.material = dark;
 
-        for(let spoke=0;spoke<5;spoke++){
-          const mesh=box("alloy spoke",.035,.52,.045,Math.sign(x)*.2,0,0,chrome,0,axle);mesh.rotation.x=spoke*Math.PI/5;
+        // Pirelli-style sidewall compound stripe
+        const stripe = MeshBuilder.CreateTorus(
+          "sidewall stripe",
+          { diameter: 0.64, thickness: 0.03, tessellation: 18 },
+          scene,
+        );
+        stripe.rotation.y = Math.PI / 2;
+        stripe.position.x = Math.sign(x) * 0.19;
+        stripe.parent = axle;
+        stripe.material = tireStripe;
+
+        // Forged alloy spokes
+        for (let spoke = 0; spoke < 5; spoke++) {
+          const spokeMesh = box(
+            "alloy spoke",
+            0.032,
+            0.52,
+            0.042,
+            Math.sign(x) * 0.18,
+            0,
+            0,
+            chrome,
+            0,
+            axle,
+          );
+          spokeMesh.rotation.x = (spoke * Math.PI) / 5;
         }
-        const hub=MeshBuilder.CreateCylinder("hub",{diameter:.18,height:.045,tessellation:12},scene);hub.rotation.z=Math.PI/2;hub.position.x=Math.sign(x)*.225;hub.parent=axle;hub.material=chrome;
-        box("brake caliper",.06,.18,.12,Math.sign(x)*.18,0,.18,red,0,pivot);
+
+        // Center wheel hub
+        const hub = MeshBuilder.CreateCylinder(
+          "hub",
+          { diameter: 0.18, height: 0.05, tessellation: 12 },
+          scene,
+        );
+        hub.rotation.z = Math.PI / 2;
+        hub.position.x = Math.sign(x) * 0.21;
+        hub.parent = axle;
+        hub.material = chrome;
+
+        // Carbon-ceramic brake disc (glows red hot under heavy braking)
+        const disc = MeshBuilder.CreateCylinder(
+          "brake disc",
+          { diameter: 0.54, height: 0.035, tessellation: 16 },
+          scene,
+        );
+        disc.rotation.z = Math.PI / 2;
+        disc.position.x = Math.sign(x) * 0.11;
+        disc.parent = axle;
+        disc.material = brakeDiscCold;
+        brakeDiscs.push(disc);
+
+        // Racing red Brembo caliper
+        box("caliper", 0.065, 0.18, 0.13, Math.sign(x) * 0.11, 0, 0.18, red, 0, pivot);
 
         wheels.push({ pivot, wheel: axle, front: z > 0 });
       }
     }
 
-    const label=document.createElement("div");label.className="driver-label";label.textContent=player.name;label.style.setProperty("--driver-color",player.color);document.body.append(label);
+    // 7. Driver Billboard Label
+    const label = document.createElement("div");
+    label.className = "driver-label";
+    label.innerHTML = `<span class="driver-tag-pip"></span><span class="driver-tag-name">${player.name}</span>`;
+    label.style.setProperty("--driver-color", player.color);
+    document.body.append(label);
 
     const result = {
       root,
       chassis,
       wheels,
-      label,brakeLights,
+      label,
+      brakeLights,
+      brakeDiscs,
+      brakeHeat: 0,
       target: null,
       samples: [],
       dispose: () => {
         root.dispose();
         paint.dispose();
+        helmetPaint.dispose();
         label.remove();
       },
     };
@@ -445,10 +645,13 @@ export function createScene(canvas) {
     return result;
   }
 
-  let currentPhase="", localInput={},
+  let currentPhase = "",
+    localInput = {},
     targets = [],
     me = null,
     racing = false,
+    camShake = 0,
+    localSteerAngle = 0,
     last = performance.now();
 
   function update(state, id) {
@@ -465,94 +668,261 @@ export function createScene(canvas) {
     }
 
     for (const t of targets) {
-      const c=cars.get(t.id);if(!c)continue;
-      if(!c.target || c.target.respawn!==t.respawn || currentPhase!==state.phase && state.phase==='countdown'){
-        c.samples=[];c.root.position.set(t.x,t.y,t.z);c.root.rotation.y=t.yaw;
-        c.fadeAt=performance.now();
+      const c = cars.get(t.id);
+      if (!c) continue;
+      if (
+        !c.target ||
+        c.target.respawn !== t.respawn ||
+        (currentPhase !== state.phase && state.phase === "countdown")
+      ) {
+        c.samples = [];
+        c.root.position.set(t.x, t.y, t.z);
+        c.root.rotation.y = t.yaw;
+        c.fadeAt = performance.now();
       }
-      c.samples.push({...t,at:performance.now()});if(c.samples.length>12)c.samples.shift();c.target=t;
+      c.samples.push({ ...t, at: performance.now() });
+      if (c.samples.length > 12) c.samples.shift();
+      c.target = t;
     }
-    currentPhase=state.phase;
+    currentPhase = state.phase;
+
+    // Synchronized 3D Start Gantry Lights
+    if (state.phase === "countdown") {
+      const elapsed = Date.now() - state.startAt;
+      let litCount = 1;
+      if (elapsed >= -600) litCount = 5;
+      else if (elapsed >= -1200) litCount = 4;
+      else if (elapsed >= -1800) litCount = 3;
+      else if (elapsed >= -2400) litCount = 2;
+      gantryBulbs.forEach((bulb, i) => {
+        bulb.material = i < litCount ? gantryRedMat : gantryOffMat;
+      });
+    } else if (state.phase === "racing" && Date.now() - state.startAt < 1200) {
+      gantryBulbs.forEach((bulb) => (bulb.material = gantryGreenMat));
+    } else {
+      gantryBulbs.forEach((bulb) => (bulb.material = gantryOffMat));
+    }
 
     const mine = targets.find((c) => c.id === me);
     gateMeshes.forEach((g, i) =>
       g.setEnabled(!!mine && i === (mine.passed + 1) % 24),
     );
+
+    // Dynamic rank tags on floating driver billboards
+    const sorted = [...targets].sort((a, b) =>
+      a.finished !== null && b.finished !== null
+        ? a.finished - b.finished
+        : a.finished !== null
+          ? -1
+          : b.finished !== null
+            ? 1
+            : b.progress - a.progress,
+    );
+    for (let i = 0; i < sorted.length; i++) {
+      const carTarget = sorted[i];
+      const c = cars.get(carTarget.id);
+      const p = state.players.find((pl) => pl.id === carTarget.id);
+      if (c && p) {
+        c.label.innerHTML = `<span class="driver-tag-pip"></span><span class="driver-tag-pos">P${i + 1}</span><span class="driver-tag-name">${p.name}</span>`;
+      }
+    }
   }
 
   engine.runRenderLoop(() => {
     const now = performance.now(),
       dt = Math.min((now - last) / 1000, 0.05);
     last = now;
-    smokeClock+=dt;
-    for(const puff of smoke)if(puff.life>0){puff.life-=dt;puff.mesh.position.y+=dt*.65;puff.mesh.scaling.scaleInPlace(1+dt*.55);puff.mesh.visibility=Math.max(0,puff.life/1.2);if(puff.life<=0)puff.mesh.setEnabled(false);}
+    smokeClock += dt;
 
+    // Dissipate tire smoke particles
+    for (const puff of smoke) {
+      if (puff.life > 0) {
+        puff.life -= dt;
+        puff.mesh.position.y += dt * 0.65;
+        puff.mesh.scaling.scaleInPlace(1 + dt * 0.55);
+        puff.mesh.visibility = Math.max(0, puff.life / 1.2);
+        if (puff.life <= 0) puff.mesh.setEnabled(false);
+      }
+    }
+
+    // Animate and bounce spark particles
+    for (const spk of sparks) {
+      if (spk.life > 0) {
+        spk.life -= dt;
+        spk.vy -= 22 * dt; // Gravity
+        spk.mesh.position.x += spk.vx * dt;
+        spk.mesh.position.y += spk.vy * dt;
+        spk.mesh.position.z += spk.vz * dt;
+        if (spk.mesh.position.y < 0.08) {
+          spk.mesh.position.y = 0.08;
+          spk.vy = -spk.vy * 0.38; // Bounce off track
+        }
+        spk.mesh.visibility = Math.max(0, spk.life / 0.5);
+        if (spk.life <= 0) spk.mesh.setEnabled(false);
+      }
+    }
+
+    // Vehicle updates & visual dynamics
     for (const c of cars.values()) {
       const t = c.target;
       if (!t) continue;
-      const alpha=1-Math.exp(-18*dt);
-      const renderAt=now-40;
-      let left=c.samples[0],right=c.samples.at(-1);
-      for(let i=1;i<c.samples.length;i++)if(c.samples[i].at>=renderAt){left=c.samples[i-1];right=c.samples[i];break;}
-      const amount=Math.max(0,Math.min(1,(renderAt-left.at)/Math.max(1,right.at-left.at)));
-      c.root.position.set(left.x+(right.x-left.x)*amount,left.y+(right.y-left.y)*amount,left.z+(right.z-left.z)*amount);
-      c.root.rotation.y=left.yaw+Math.atan2(Math.sin(right.yaw-left.yaw),Math.cos(right.yaw-left.yaw))*amount;
-      // No unbounded extrapolation: contacts stay on a common interpolation timeline.
-      c.brakeLights.forEach(light=>light.setEnabled(!!t.braking));
-      const visualSteer=c.root.name===me?((localInput.left?-1:0)+(localInput.right?1:0)):t.steer;
-      if(t.drift&&t.speed>10&&smokeClock>.035){
-        const puff=smoke[smokeCursor++%smoke.length];puff.life=1.2;puff.mesh.setEnabled(true);puff.mesh.position.copyFrom(c.root.position);puff.mesh.position.x-=Math.sin(c.root.rotation.y)*1.7;puff.mesh.position.z-=Math.cos(c.root.rotation.y)*1.7;puff.mesh.position.y=.28;puff.mesh.scaling.setAll(.6);smokeClock=0;
+      const isMine = c.root.name === me;
+      const alpha = 1 - Math.exp(-22 * dt);
+
+      // Interpolation timeline
+      const renderAt = now - 35;
+      let left = c.samples[0],
+        right = c.samples.at(-1);
+      for (let i = 1; i < c.samples.length; i++) {
+        if (c.samples[i].at >= renderAt) {
+          left = c.samples[i - 1];
+          right = c.samples[i];
+          break;
+        }
       }
-      // Dynamic suspension roll based on turning Gs
-      const targetRoll = -t.steer * Math.min(1, t.speed / 28) * 0.07;
+      const amount = Math.max(
+        0,
+        Math.min(1, (renderAt - left.at) / Math.max(1, right.at - left.at)),
+      );
+
+      const targetPosX = left.x + (right.x - left.x) * amount;
+      const targetPosY = left.y + (right.y - left.y) * amount;
+      const targetPosZ = left.z + (right.z - left.z) * amount;
+      const targetYaw =
+        left.yaw +
+        Math.atan2(Math.sin(right.yaw - left.yaw), Math.cos(right.yaw - left.yaw)) *
+          amount;
+
+      c.root.position.set(targetPosX, targetPosY, targetPosZ);
+      c.root.rotation.y = targetYaw;
+
+      // Active brake lights and glowing carbon discs
+      c.brakeLights.forEach((light) => light.setEnabled(!!t.braking));
+      if (t.braking && t.speed > 10) {
+        c.brakeHeat = Math.min(1, c.brakeHeat + dt * 3.2);
+      } else {
+        c.brakeHeat = Math.max(0, c.brakeHeat - dt * 1.8);
+      }
+      const discMat = c.brakeHeat > 0.35 ? brakeDiscHot : brakeDiscCold;
+      c.brakeDiscs.forEach((d) => (d.material = discMat));
+
+      // Responsive steering: zero latency visual turn-in
+      const rawSteerInput = (localInput.left ? -1 : 0) + (localInput.right ? 1 : 0);
+      if (isMine) {
+        localSteerAngle += (rawSteerInput - localSteerAngle) * (1 - Math.exp(-32 * dt));
+      }
+      const visualSteer = isMine ? localSteerAngle : t.steer;
+
+      // Tire smoke on heavy drift or braking
+      if (t.drift && t.speed > 8 && smokeClock > 0.035) {
+        const puff = smoke[smokeCursor++ % smoke.length];
+        puff.life = 1.1;
+        puff.mesh.setEnabled(true);
+        puff.mesh.position.copyFrom(c.root.position);
+        puff.mesh.position.x -= Math.sin(c.root.rotation.y) * 1.7;
+        puff.mesh.position.z -= Math.cos(c.root.rotation.y) * 1.7;
+        puff.mesh.position.y = 0.28;
+        puff.mesh.scaling.setAll(0.65);
+        smokeClock = 0;
+      }
+
+      // Spark bursts on physical impact
+      if (t.impact > 0.08) {
+        emitSparks(
+          c.root.position.x,
+          c.root.position.y + 0.25,
+          c.root.position.z,
+          Math.floor(t.impact * 12),
+          1.2,
+        );
+      }
+
+      // Dynamic suspension pitch (squat on gas, dive on brake) and roll into turns
+      const targetPitch = (t.throttle ? 0.022 : 0) - (t.braking ? 0.038 : 0);
+      const targetRoll = -visualSteer * Math.min(1, t.speed / 24) * 0.075;
+      c.chassis.rotation.x += (targetPitch - c.chassis.rotation.x) * alpha;
       c.chassis.rotation.z += (targetRoll - c.chassis.rotation.z) * alpha;
 
+      // Wheel spinning & Ackermann steering geometry
       for (const w of c.wheels) {
         w.wheel.rotation.x += (t.speed * dt) / 0.38;
-        w.pivot.rotation.y += ((w.front ? visualSteer * .32 : 0)-w.pivot.rotation.y)*alpha;
+        const steerTarget = w.front ? visualSteer * 0.34 : 0;
+        w.pivot.rotation.y += (steerTarget - w.pivot.rotation.y) * alpha;
       }
     }
 
-    // Resolve tiny interpolation penetrations without altering server race state.
-    const visible=[...cars.values()];
-    for(let pass=0;pass<3;pass++)for(let i=0;i<visible.length;i++)for(let j=i+1;j<visible.length;j++){
-      const a=visible[i].root,b=visible[j].root,hit=overlap({x:a.position.x,z:a.position.z,yaw:a.rotation.y},{x:b.position.x,z:b.position.z,yaw:b.rotation.y});
-      if(hit){const correction=Math.min(hit.depth+.002,.35)*.5;a.position.x-=hit.x*correction;a.position.z-=hit.z*correction;b.position.x+=hit.x*correction;b.position.z+=hit.z*correction;}
+    // Resolve tiny interpolation penetrations and emit contact sparks
+    const visible = [...cars.values()];
+    for (let pass = 0; pass < 3; pass++) {
+      for (let i = 0; i < visible.length; i++) {
+        for (let j = i + 1; j < visible.length; j++) {
+          const a = visible[i].root,
+            b = visible[j].root,
+            hit = overlap(
+              { x: a.position.x, z: a.position.z, yaw: a.rotation.y },
+              { x: b.position.x, z: b.position.z, yaw: b.rotation.y },
+            );
+          if (hit) {
+            const correction = Math.min(hit.depth + 0.002, 0.35) * 0.5;
+            a.position.x -= hit.x * correction;
+            a.position.z -= hit.z * correction;
+            b.position.x += hit.x * correction;
+            b.position.z += hit.z * correction;
+            if (pass === 0 && Math.random() < 0.25) {
+              emitSparks(
+                (a.position.x + b.position.x) * 0.5,
+                0.3,
+                (a.position.z + b.position.z) * 0.5,
+                6,
+                0.8,
+              );
+            }
+          }
+        }
+      }
     }
+
+    // Dynamic Chase Camera with look-ahead, speed FOV & collision shake
     const mine = cars.get(me);
     if (racing && mine && mine.target) {
       const p = mine.root.position,
         yaw = mine.root.rotation.y,
         speed = mine.target.speed;
 
-      // Smooth chase camera
-      const camDist = 10.8 + Math.min(1.6, speed * 0.03);
-      const camHeight = 4.3 + Math.min(0.5, speed * 0.01);
+      // Screen shake impulse on impact
+      if (mine.target.impact > 0.08) {
+        camShake = Math.min(0.45, camShake + mine.target.impact * 0.35);
+      }
+      camShake *= Math.exp(-9 * dt);
+
+      // Smooth chase camera distance and height
+      const camDist = 10.6 + Math.min(1.8, speed * 0.035);
+      const camHeight = 4.2 + Math.min(0.6, speed * 0.012);
 
       const desired = new Vector3(
-        p.x - Math.sin(yaw) * camDist,
-        p.y + camHeight,
-        p.z - Math.cos(yaw) * camDist,
+        p.x - Math.sin(yaw) * camDist + (Math.random() - 0.5) * camShake,
+        p.y + camHeight + (Math.random() - 0.5) * camShake,
+        p.z - Math.cos(yaw) * camDist + (Math.random() - 0.5) * camShake,
       );
 
       camera.position = Vector3.Lerp(
         camera.position,
         desired,
-        1 - Math.exp(-7 * dt),
+        1 - Math.exp(-8 * dt),
       );
 
-      // Look-ahead target
-      const lookDist = 7 + Math.min(5, speed * 0.1);
+      // Look-ahead target anticipates corners
+      const lookDist = 7.5 + Math.min(5.5, speed * 0.12);
       const lookTarget = new Vector3(
         p.x + Math.sin(yaw) * lookDist,
-        p.y + 1.2,
+        p.y + 1.25,
         p.z + Math.cos(yaw) * lookDist,
       );
       camera.setTarget(lookTarget);
 
-      // Speed FOV expansion
-      const targetFov = 0.82 + Math.min(0.12, (speed / 50) * 0.12);
-      camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-5 * dt));
+      // Speed FOV expansion (intense tunnel vision at top speed)
+      const targetFov = 0.82 + Math.min(0.14, (speed / 50) * 0.14);
+      camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-6 * dt));
     } else {
       // Cinematic orbit in lobby / results
       const t = now * 0.00015;
@@ -562,18 +932,54 @@ export function createScene(canvas) {
     }
 
     scene.render();
-    // Constant-size labels are projected after camera updates, then culled near the lens/HUD.
-    const occupied=[];
-    const viewport=camera.viewport.toGlobal(engine.getRenderWidth(),engine.getRenderHeight());
-    for(const c of [...cars.values()].sort((a,b)=>Vector3.DistanceSquared(a.root.position,camera.position)-Vector3.DistanceSquared(b.root.position,camera.position))){
-      const anchor=c.root.position.add(new Vector3(0,2.15,0));
-      const projected=Vector3.Project(anchor,Matrix.Identity(),scene.getTransformMatrix(),viewport);
-      const distance=Vector3.Distance(anchor,camera.position);
-      const x=projected.x/engine.getRenderWidth()*innerWidth,y=projected.y/engine.getRenderHeight()*innerHeight;
-      const isMine=c.root.name===me;
-      const hidden=!racing||currentPhase==='results'||isMine||projected.z<0||projected.z>1||distance<6||distance>160||x<90||x>innerWidth-90||y<180||y>innerHeight-100||occupied.some(p=>Math.abs(p.x-x)<150&&Math.abs(p.y-y)<36);
-      c.label.hidden=hidden;
-      if(!hidden){occupied.push({x,y});c.label.style.transform='translate(-50%,-100%) translate('+x+'px,'+y+'px)';c.label.style.opacity=String(Math.min(1,(160-distance)/30));}
+
+    // Floating broadcast driver tags: positioned safely above car (+2.65m)
+    const occupied = [];
+    const viewport = camera.viewport.toGlobal(
+      engine.getRenderWidth(),
+      engine.getRenderHeight(),
+    );
+
+    for (const c of [...cars.values()].sort(
+      (a, b) =>
+        Vector3.DistanceSquared(a.root.position, camera.position) -
+        Vector3.DistanceSquared(b.root.position, camera.position),
+    )) {
+      const anchor = c.root.position.add(new Vector3(0, 2.65, 0));
+      const projected = Vector3.Project(
+        anchor,
+        Matrix.Identity(),
+        scene.getTransformMatrix(),
+        viewport,
+      );
+      const distance = Vector3.Distance(anchor, camera.position);
+      const x = (projected.x / engine.getRenderWidth()) * innerWidth,
+        y = (projected.y / engine.getRenderHeight()) * innerHeight;
+      const isMine = c.root.name === me;
+      const hidden =
+        !racing ||
+        currentPhase === "results" ||
+        isMine ||
+        projected.z < 0 ||
+        projected.z > 1 ||
+        distance < 4.5 ||
+        distance > 150 ||
+        x < 80 ||
+        x > innerWidth - 80 ||
+        y < 120 ||
+        y > innerHeight - 80 ||
+        occupied.some(
+          (p) => Math.abs(p.x - x) < 140 && Math.abs(p.y - y) < 32,
+        );
+      c.label.hidden = hidden;
+      if (!hidden) {
+        occupied.push({ x, y });
+        const scale = Math.max(0.72, Math.min(1.05, 26 / distance));
+        c.label.style.transform = `translate(-50%,-100%) translate(${x.toFixed(1)}px,${y.toFixed(1)}px) scale(${scale.toFixed(2)})`;
+        c.label.style.opacity = String(
+          Math.min(1, (150 - distance) / 25),
+        );
+      }
     }
   });
 

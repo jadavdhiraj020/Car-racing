@@ -1,7 +1,7 @@
 import "./style.css";
 import { io } from "socket.io-client";
 import { createScene } from "./scene.js";
-import { TRACK, LENGTH, point } from "../../shared/track.js";
+import { TRACK, LENGTH, point, nearest } from "../../shared/track.js";
 
 const $ = (id) => document.getElementById(id),
   socket = io(),
@@ -15,12 +15,13 @@ let view,
   sound = false,
   lastCountdown = "",
   lastPhase = "",
+  lastGantryStep = -1,
   quality = 1;
 
 window.__getState = () => state;
 window.__getKeys = () => keys;
 
-import {EngineAudio} from "./audio.js";
+import { EngineAudio } from "./audio.js";
 
 const engineAudio = new EngineAudio();
 
@@ -189,12 +190,25 @@ function render() {
 
   const rows = ordered(),
     player = (id) => state.players.find((p) => p.id === id);
+  const leaderProgress = rows[0]?.progress || 0;
 
   $("leaderboard").innerHTML = rows
-    .map(
-      (c, i) =>
-        `<div class="leader-row"><span>${i + 1}　${esc(player(c.id)?.name)}</span><span>${c.finished !== null ? "FIN" : "L" + Math.min(3, Math.floor(c.passed / 24) + 1)}</span></div>`,
-    )
+    .map((c, i) => {
+      const p = player(c.id);
+      const isMe = c.id === socket.id;
+      const delta =
+        i === 0
+          ? "LEADER"
+          : c.finished !== null
+            ? time(c.finished)
+            : `+${Math.max(0.1, (leaderProgress - c.progress) * 1.5).toFixed(1)}s`;
+      return `<div class="leader-row ${isMe ? "me" : ""}">` +
+        `<span class="leader-pos">${i + 1}</span>` +
+        `<i class="swatch" style="background:${p?.color || "#fff"}"></i>` +
+        `<span class="leader-name">${esc(p?.name || "Driver")}</span>` +
+        `<span class="leader-gap">${c.finished !== null ? "FIN" : delta}</span>` +
+        `</div>`;
+    })
     .join("");
 
   if (phase === "results") {
@@ -213,6 +227,7 @@ function render() {
       ? "New grid. Same friends."
       : "Waiting for host to rematch…";
   }
+  updateHud();
 }
 
 socket.on("state", (s) => {
@@ -230,6 +245,7 @@ socket.on("state", (s) => {
       for(let i=0;i<28;i++){const piece=document.createElement('i');piece.className='confetti';piece.style.cssText='--x:'+((i*37)%100)+'vw;--delay:'+(i%7)*.09+'s;--hue:'+(i*43)+';';document.body.append(piece);setTimeout(()=>piece.remove(),4500);} document.getElementById("results").classList.remove("celebrate"); requestAnimationFrame(()=>document.getElementById("results").classList.add("celebrate")); }
     lastPhase = s.phase;
   }
+  sendInput();
   render();
   if (s.phase === "lobby") {
     const url = new URL(location.href);
@@ -324,15 +340,8 @@ function sendInput() {
 }
 setInterval(sendInput, 1000 / 30);
 
-function frame() {
-  requestAnimationFrame(frame);
-  sendInput();
-  if (!state) {
-    if (sound) engineAudio.mute();
-    return;
-  }
-  const c = state.cars.find((c) => c.id === socket.id);
-  if (!c) return;
+function updateCountdown() {
+  if (!state) return;
   const now = Date.now() + offset,
     elapsed = now - state.startAt;
   const count =
@@ -345,8 +354,51 @@ function frame() {
   if (count !== lastCountdown) {
     if (count) beep(count === "GO!" ? 900 : 500);
     lastCountdown = count;
-    $("countdown").classList.remove("pulse"); void $("countdown").offsetWidth; if(count) $("countdown").classList.add("pulse");
+    $("countdown").classList.remove("pulse");
+    void $("countdown").offsetWidth;
+    if (count) $("countdown").classList.add("pulse");
   }
+
+  // Synchronized 5-light HUD gantry and audio tones
+  const gantryHud = $("gantryHud");
+  if (gantryHud) {
+    const isCountdown = state.phase === "countdown";
+    const isJustStarted = state.phase === "racing" && elapsed < 1200;
+    gantryHud.hidden = !isCountdown && !isJustStarted;
+    if (isCountdown) {
+      let litCount = 1;
+      if (elapsed >= -600) litCount = 5;
+      else if (elapsed >= -1200) litCount = 4;
+      else if (elapsed >= -1800) litCount = 3;
+      else if (elapsed >= -2400) litCount = 2;
+      gantryHud.querySelectorAll("i").forEach((dot, idx) => {
+        dot.className = idx < litCount ? "lit" : "";
+      });
+      if (litCount !== lastGantryStep) {
+        if (sound) engineAudio.countdownLight(litCount);
+        lastGantryStep = litCount;
+      }
+    } else if (isJustStarted) {
+      gantryHud.querySelectorAll("i").forEach((dot) => {
+        dot.className = "green";
+      });
+      if (lastGantryStep !== 0) {
+        if (sound) engineAudio.countdownLight(0);
+        lastGantryStep = 0;
+      }
+    } else {
+      lastGantryStep = -1;
+    }
+  }
+}
+
+function updateHud() {
+  if (!state) return;
+  const now = Date.now() + offset,
+    elapsed = now - state.startAt;
+  updateCountdown();
+  const c = state.cars.find((c) => c.id === socket.id);
+  if (!c) return;
   $("lap").textContent = `${Math.min(3, Math.floor(c.passed / 24) + 1)} / 3`;
   $("position").textContent =
     `${ordered().findIndex((p) => p.id === c.id) + 1} / ${state.players.length}`;
@@ -358,22 +410,38 @@ function frame() {
       : state.endAt
         ? `Finish window: ${Math.max(0, Math.ceil((state.endAt - now) / 1000))}s`
         : "";
+}
 
-  // Dynamic engine audio updates
-  {
-    engineAudio.update(
-      c.speed,
-      !!keys.up,
-      !!keys.down,
-      !!keys.drift,
-      state.phase === "racing",
-      c.finished !== null,
-    );
+function frame() {
+  requestAnimationFrame(frame);
+  sendInput();
+  if (!state) {
+    if (sound) engineAudio.mute();
+    return;
   }
+  const c = state.cars.find((c) => c.id === socket.id);
+  if (!c) return;
+  updateHud();
 
-  if(sound) engineAudio.impact(c.impact||0);
-  $("gear").textContent = keys.down && c.speed<2 ? "R" : engineAudio.gear;
-  $("rpm").style.setProperty("--rpm", Math.min(100,engineAudio.rpm/145));
+  // Dynamic engine audio & kerb rumble updates
+  const distFromCenter = nearest(c.x, c.z).distance;
+  const onKerb = Math.abs(distFromCenter - 10.6) < 1.35;
+  engineAudio.update(
+    c.speed,
+    !!keys.up,
+    !!keys.down,
+    !!keys.drift,
+    state.phase === "racing",
+    c.finished !== null,
+    onKerb,
+  );
+
+  if (sound) engineAudio.impact(c.impact || 0);
+  $("gear").textContent =
+    keys.down && c.speed < 2 ? "R" : state.phase !== "racing" ? "N" : engineAudio.gear;
+  const rpmPercent = Math.min(100, Math.max(0, (engineAudio.rpm / 13500) * 100));
+  $("rpm").style.setProperty("--rpm", rpmPercent);
+  $("rpm").classList.toggle("shift-blink", engineAudio.rpm > 12400);
   view?.input(keys);
   // 2D Circuit Minimap (scaled for the new grand-prix circuit)
   map.clearRect(0, 0, 180, 200);
