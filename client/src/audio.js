@@ -13,8 +13,11 @@ export class EngineAudio {
     this.highOsc = null;
     this.raspOsc = null;
     this.turboOsc = null;
+    this.mguOsc = null;
     this.engineGain = null;
     this.turboGain = null;
+    this.mguGain = null;
+    this.mguFilter = null;
     this.screamerFilter = null;
     this.intakeFilter = null;
     this.exhaustShaper = null;
@@ -150,6 +153,19 @@ export class EngineAudio {
     this.turboFilter.connect(this.turboGain);
     this.turboGain.connect(this.master);
 
+    // 5b. MGU-K / MGU-H hybrid electric boost spool whine
+    this.mguOsc = ctx.createOscillator();
+    this.mguOsc.type = "sine";
+    this.mguGain = ctx.createGain();
+    this.mguGain.gain.value = 0.0;
+    this.mguFilter = ctx.createBiquadFilter();
+    this.mguFilter.type = "bandpass";
+    this.mguFilter.frequency.value = 4200;
+    this.mguFilter.Q.value = 5.0;
+    this.mguOsc.connect(this.mguFilter);
+    this.mguFilter.connect(this.mguGain);
+    this.mguGain.connect(this.master);
+
     // 6. Wind noise generator (high speed rush)
     const bufferSize = ctx.sampleRate * 2;
     const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
@@ -206,6 +222,7 @@ export class EngineAudio {
     this.highOsc.start(now);
     this.raspOsc.start(now);
     this.turboOsc.start(now);
+    this.mguOsc.start(now);
     noiseSource.start(now);
     skidSource.start(now);
     this.kerbOsc.start(now);
@@ -216,7 +233,7 @@ export class EngineAudio {
 
   update(speed, throttle, brake, drift, racing, finished, onKerb = false) {
     const now = performance.now();
-    const dt = Math.min(0.1, (now - this.previous) / 1000);
+    const dt = Math.min(0.05, Math.max(0.001, (now - this.previous) / 1000));
     this.previous = now;
 
     // F1 sequential 6-speed gearbox simulation
@@ -324,6 +341,24 @@ export class EngineAudio {
         0.05,
       );
 
+      // MGU-K / MGU-H electric hybrid spool whine
+      if (this.mguOsc && this.mguGain) {
+        const mguFreq = 3400 + (this.rpm / this.maxRpm) * 2200;
+        this.mguOsc.frequency.setTargetAtTime(mguFreq, t, 0.03);
+        const mguVol =
+          racing && throttle && safeSpeed > 12
+            ? Math.min(0.07, (safeSpeed / 50) * 0.07)
+            : 0;
+        this.mguGain.gain.setTargetAtTime(mguVol, t, 0.04);
+      }
+
+      // Off-throttle overrun burble / crackle on lift-off at high RPM
+      if (racing && !throttle && safeSpeed > 16 && this.rpm > 6800) {
+        if (Math.random() < 0.16 && now - this.lastPop > 85) {
+          this.exhaustPop(0.28 + Math.random() * 0.22);
+        }
+      }
+
       // Formant acoustic filters
       const filterCutoff = Math.min(
         7500,
@@ -372,10 +407,11 @@ export class EngineAudio {
   exhaustPop(intensity = 0.6) {
     if (!this.ctx || !this.effects || !this.enabled) return;
     const now = performance.now();
-    if (now - this.lastPop < 90) return;
+    if (now - this.lastPop < 75) return;
     this.lastPop = now;
 
     const t = this.ctx.currentTime;
+    const safeIntensity = Math.max(0.05, Math.min(1.0, intensity));
     const popOsc = this.ctx.createOscillator();
     const popGain = this.ctx.createGain();
 
@@ -383,7 +419,7 @@ export class EngineAudio {
     popOsc.frequency.setValueAtTime(140 + Math.random() * 40, t);
     popOsc.frequency.exponentialRampToValueAtTime(30, t + 0.07);
 
-    popGain.gain.setValueAtTime(intensity * 0.5, t);
+    popGain.gain.setValueAtTime(Math.max(0.001, safeIntensity * 0.5), t);
     popGain.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
 
     popOsc.connect(popGain);
@@ -392,14 +428,17 @@ export class EngineAudio {
     popOsc.start(t);
     popOsc.stop(t + 0.07);
     popOsc.onended = () => {
-      popOsc.disconnect();
-      popGain.disconnect();
+      try {
+        popOsc.disconnect();
+        popGain.disconnect();
+      } catch {}
     };
   }
 
   wastegateFlutter(boost = 0.5) {
     if (!this.ctx || !this.effects || !this.enabled) return;
     const t = this.ctx.currentTime;
+    const safeBoost = Math.max(0.05, Math.min(1.0, boost));
     const bursts = 4;
     for (let i = 0; i < bursts; i++) {
       const delay = i * 0.055;
@@ -416,7 +455,7 @@ export class EngineAudio {
       flutterFilter.frequency.setValueAtTime(1600 - i * 140, t + delay);
       flutterFilter.Q.value = 5.0;
 
-      flutterGain.gain.setValueAtTime(boost * 0.22 * decay, t + delay);
+      flutterGain.gain.setValueAtTime(Math.max(0.001, safeBoost * 0.22 * decay), t + delay);
       flutterGain.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.045);
 
       flutterOsc.connect(flutterFilter);
@@ -426,9 +465,11 @@ export class EngineAudio {
       flutterOsc.start(t + delay);
       flutterOsc.stop(t + delay + 0.045);
       flutterOsc.onended = () => {
-        flutterOsc.disconnect();
-        flutterFilter.disconnect();
-        flutterGain.disconnect();
+        try {
+          flutterOsc.disconnect();
+          flutterFilter.disconnect();
+          flutterGain.disconnect();
+        } catch {}
       };
     }
   }
@@ -569,7 +610,7 @@ export class EngineAudio {
     });
   }
 
-  updateRemoteCar(id, carPos, camPos, speed, throttle) {
+  updateRemoteCar(id, carPos, camPos, speed, throttle, carVel = null, camVel = null) {
     if (!this.ctx || !this.enabled) return;
     if (
       !carPos ||
@@ -583,7 +624,10 @@ export class EngineAudio {
     )
       return;
     const t = this.ctx.currentTime;
-    if (Math.hypot(carPos.x - camPos.x, carPos.z - camPos.z) > 90) {
+    const dx = carPos.x - camPos.x;
+    const dz = carPos.z - camPos.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > 100) {
       this.removeRemoteCar(id);
       return;
     }
@@ -592,10 +636,10 @@ export class EngineAudio {
       try {
         const panner = this.ctx.createPanner();
         panner.panningModel = "HRTF";
-        panner.distanceModel = "exponential";
+        panner.distanceModel = "inverse";
         panner.refDistance = 4;
-        panner.maxDistance = 90;
-        panner.rolloffFactor = 1.1;
+        panner.maxDistance = 100;
+        panner.rolloffFactor = 1.0;
 
         const osc = this.ctx.createOscillator();
         osc.type = "sawtooth";
@@ -630,11 +674,24 @@ export class EngineAudio {
         node.panner.setPosition(carPos.x, carPos.y, -carPos.z);
       }
 
+      // True acoustic line-of-sight Doppler pitch shift
+      let doppler = 1.0;
+      if (dist > 0.05 && carVel && camVel) {
+        const rx = dx / dist,
+          rz = dz / dist;
+        const relRadialVel =
+          ((carVel.x || 0) - (camVel.x || 0)) * rx +
+          ((carVel.z || 0) - (camVel.z || 0)) * rz;
+        // Doppler factor: c / (c + v_radial) with c = 343 m/s
+        doppler = Math.max(0.7, Math.min(1.4, 343 / (343 + relRadialVel)));
+      }
+
       const safeSpeed = Number.isFinite(speed) ? Math.max(0, speed) : 0;
-      const freq = Math.max(50, 48 + safeSpeed * 4.6);
+      const baseFreq = (48 + safeSpeed * 4.6) * doppler;
+      const freq = Math.max(45, Math.min(3200, baseFreq));
       node.osc.frequency.setTargetAtTime(freq, t, 0.04);
       node.filter.frequency.setTargetAtTime(
-        Math.min(2800, 600 + safeSpeed * 35),
+        Math.min(3200, (600 + safeSpeed * 35) * doppler),
         t,
         0.04,
       );
@@ -712,7 +769,7 @@ export class EngineAudio {
     if (this.master && this.ctx) {
       this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
     }
-    for (const id of this.remoteCars.keys()) {
+    for (const id of [...this.remoteCars.keys()]) {
       this.removeRemoteCar(id);
     }
   }

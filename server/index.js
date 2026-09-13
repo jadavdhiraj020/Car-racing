@@ -54,6 +54,15 @@ export async function createGame({ dev = false } = {}) {
       return;
     }
     if (r.host === s.id) r.host = r.players.keys().next().value;
+    if (r.phase === "racing") {
+      const remainingCars = [...r.race.cars.values()];
+      if (
+        remainingCars.length > 0 &&
+        remainingCars.every((c) => c.finished !== null)
+      ) {
+        r.phase = "results";
+      }
+    }
     io.to(r.code).emit("notice", `${p?.name || "Player"} disconnected`);
     broadcast(r);
   }
@@ -179,10 +188,12 @@ export async function createGame({ dev = false } = {}) {
     accumulator = 0;
   const interval = setInterval(() => {
     const mono = performance.now();
-    accumulator += Math.min(0.15, (mono - lastTick) / 1000);
+    accumulator += Math.min(0.1, (mono - lastTick) / 1000);
     lastTick = mono;
-    while (accumulator >= 1 / 60) {
+    let steps = 0;
+    while (accumulator >= 1 / 60 && steps < 5) {
       accumulator -= 1 / 60;
+      steps++;
       const now = Date.now() - accumulator * 1000;
       for (const r of rooms.values()) {
         if (r.phase === "countdown" && now >= r.startAt) r.phase = "racing";

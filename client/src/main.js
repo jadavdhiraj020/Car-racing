@@ -73,11 +73,17 @@ function syncClock() {
       rtt: end - start,
       offset: serverTime - (start + end) / 2,
     });
-    clockSamples = clockSamples.slice(-8);
+    clockSamples = clockSamples.slice(-16);
     const best = [...clockSamples].sort((a, b) => a.rtt - b.rtt)[0];
     offset = best.offset;
     clockKnown = true;
-    view?.network(offset, best.rtt);
+    const meanRtt =
+      clockSamples.reduce((acc, s) => acc + s.rtt, 0) / clockSamples.length;
+    const variance =
+      clockSamples.reduce((acc, s) => acc + (s.rtt - meanRtt) ** 2, 0) /
+      clockSamples.length;
+    const stdDev = Math.sqrt(variance);
+    view?.network(offset, best.rtt, stdDev);
   });
 }
 setInterval(syncClock, 5000);
@@ -189,6 +195,7 @@ socket.on("disconnect", () => {
   $("connection").textContent = "RECONNECTING";
   state = null;
   for (const k in keys) keys[k] = false;
+  if (sound) engineAudio.silence();
   render();
   view?.update({ cars: [], players: [], phase: "lobby" }, socket.id);
   notice(
@@ -421,6 +428,7 @@ window.addEventListener("blur", () => {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     for (const k in keys) keys[k] = false;
+    if (sound) engineAudio.silence();
     sendInput(true);
   }
 });
@@ -544,7 +552,7 @@ function frame() {
     const safeX = Number.isFinite(c.x) ? c.x : 0;
     const safeZ = Number.isFinite(c.z) ? c.z : 0;
     const distFromCenter = nearest(safeX, safeZ).distance;
-    const onKerb = Math.abs(distFromCenter - 10.6) < 1.35;
+    const onKerb = distFromCenter >= 9.8 && distFromCenter <= 11.6;
     try {
       engineAudio.update(
         Number.isFinite(c.speed) ? c.speed : 0,

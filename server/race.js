@@ -119,6 +119,7 @@ export class Race {
     return true;
   }
   step(dt, now, running, startAt) {
+    const safeDt = Math.min(0.05, Math.max(0.001, Number.isFinite(dt) ? dt : 1 / 60));
     for (const c of this.cars.values()) {
       const input =
         running && !c.finished && now - c.inputAt < 500 ? c.input : {};
@@ -126,7 +127,7 @@ export class Race {
         this.reset(c);
         c.resetAt = now;
       }
-      c.impact = (Number.isFinite(c.impact) ? c.impact : 0) * Math.exp(-12 * dt);
+      c.impact = (Number.isFinite(c.impact) ? c.impact : 0) * Math.exp(-12 * safeDt);
       const motion = {
         x: c.b.position.x,
         z: c.b.position.z,
@@ -135,7 +136,7 @@ export class Race {
         vx: c.b.velocity.x,
         vz: c.b.velocity.z,
       };
-      drive(motion, input, dt, running && !c.finished);
+      drive(motion, input, safeDt, running && !c.finished);
       c.yaw = motion.yaw;
       c.steer = motion.steer;
       c.b.velocity.x = motion.vx;
@@ -287,6 +288,7 @@ export class Race {
     }
   }
   progress(c, now, startAt, dt = 0) {
+    const safeDt = Math.min(0.05, Math.max(0, Number.isFinite(dt) ? dt : 0));
     const next = (c.passed + 1) % 24,
       g = gates[next],
       p = c.b.position,
@@ -299,11 +301,15 @@ export class Race {
     );
     if (before <= 0 && after > 0 && across < TRACK.width / 2 + 2) {
       c.passed++;
-      if (c.passed === 24 * TRACK.laps)
+      if (c.passed === 24 * TRACK.laps) {
+        const denom = after - before;
+        const frac =
+          Math.abs(denom) > 1e-4 ? Math.max(0, Math.min(1, -before / denom)) : 1;
         c.finished = Math.max(
           0.001,
-          now - startAt - dt * 1000 * (1 - -before / (after - before)),
+          now - startAt - safeDt * 1000 * (1 - frac),
         );
+      }
     }
   }
   snapshot() {

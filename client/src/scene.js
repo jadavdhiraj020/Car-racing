@@ -1124,6 +1124,9 @@ export function createScene(canvas, audioSystem = null) {
   let serverOffset = 0,
     inputHistory = [],
     predictionRtt = 0,
+    jitterStdDev = 0,
+    smoothInterpDelay = 65,
+    cameraVel = new Vector3(0, 0, 0),
     currentPhase = "",
     localInput = {},
     targets = [],
@@ -1204,7 +1207,15 @@ export function createScene(canvas, audioSystem = null) {
             c.prediction.vz * age +
             (c.reconcile?.z || 0) -
             motion.z;
-          c.reconcile = Math.hypot(x, z) < 3 ? { x, z } : null;
+          const errDist = Math.hypot(x, z);
+          if (errDist < 0.025) {
+            c.reconcile = null;
+          } else if (errDist < 2.5) {
+            c.reconcile = { x, z };
+          } else {
+            c.prediction = motion;
+            c.reconcile = null;
+          }
         }
         c.prediction = motion;
         c.predictedAt = performance.now();
@@ -1316,9 +1327,14 @@ export function createScene(canvas, audioSystem = null) {
       const isMine = c.root.name === me;
       const alpha = 1 - Math.exp(-22 * dt);
 
-      // Interpolation timeline
-      const renderAt =
-        now - Math.max(55, Math.min(180, predictionRtt / 2 + 35));
+      // Adaptive Jitter Buffer: scales dynamically with RTT and packet variance
+      const targetInterpDelay = Math.max(
+        45,
+        Math.min(150, predictionRtt / 2 + 2.0 * jitterStdDev + 25),
+      );
+      smoothInterpDelay +=
+        (targetInterpDelay - smoothInterpDelay) * (1 - Math.exp(-6 * dt));
+      const renderAt = now - smoothInterpDelay;
       let left = c.samples[0],
         right = c.samples.at(-1);
       for (let i = 1; i < c.samples.length; i++) {
@@ -1332,7 +1348,7 @@ export function createScene(canvas, audioSystem = null) {
       const amount = Math.max(0, Math.min(1, (renderAt - left.at) / spanMs));
       const dtSec = spanMs / 1000;
 
-      // Hermite cubic spline velocity-guided smoothing
+      // Hermite cubic spline velocity-guided smoothing with tangent clamping
       const tNorm = amount;
       const t2 = tNorm * tNorm;
       const t3 = t2 * tNorm;
@@ -1342,10 +1358,38 @@ export function createScene(canvas, audioSystem = null) {
       const h01 = -2 * t3 + 3 * t2;
       const h11 = t3 - t2;
 
-      const vx0 = (left.vx ?? 0) * dtSec;
-      const vz0 = (left.vz ?? 0) * dtSec;
-      const vx1 = (right.vx ?? 0) * dtSec;
-      const vz1 = (right.vz ?? 0) * dtSec;
+      let vx0 = (left.vx ?? 0) * dtSec;
+      let vz0 = (left.vz ?? 0) * dtSec;
+      let vx1 = (right.vx ?? 0) * dtSec;
+      let vz1 = (right.vz ?? 0) * dtSec;
+
+      const chordX = right.x - left.x;
+      const chordZ = right.z - left.z;
+      const chordLen = Math.hypot(chordX, chordZ);
+
+      // Clamp velocity tangents against chord displacement to prevent loop-backs or bulging
+      if (chordLen > 0.001) {
+        const uX = chordX / chordLen,
+          uZ = chordZ / chordLen;
+        const dot0 = vx0 * uX + vz0 * uZ;
+        const dot1 = vx1 * uX + vz1 * uZ;
+        if (dot0 < 0) {
+          vx0 = 0;
+          vz0 = 0;
+        } else if (dot0 > chordLen * 2.2) {
+          const s = (chordLen * 2.2) / dot0;
+          vx0 *= s;
+          vz0 *= s;
+        }
+        if (dot1 < 0) {
+          vx1 = 0;
+          vz1 = 0;
+        } else if (dot1 > chordLen * 2.2) {
+          const s = (chordLen * 2.2) / dot1;
+          vx1 *= s;
+          vz1 *= s;
+        }
+      }
 
       let targetPosX, targetPosZ;
       if (
@@ -1354,11 +1398,11 @@ export function createScene(canvas, audioSystem = null) {
       ) {
         targetPosX = h00 * left.x + h10 * vx0 + h01 * right.x + h11 * vx1;
         targetPosZ = h00 * left.z + h10 * vz0 + h01 * right.z + h11 * vz1;
-        // Clamp Hermite overshoot to sample bounds + 1.2m
-        const minX = Math.min(left.x, right.x) - 1.2,
-          maxX = Math.max(left.x, right.x) + 1.2;
-        const minZ = Math.min(left.z, right.z) - 1.2,
-          maxZ = Math.max(left.z, right.z) + 1.2;
+        // Clamp Hermite overshoot to sample bounds + 0.8m
+        const minX = Math.min(left.x, right.x) - 0.8,
+          maxX = Math.max(left.x, right.x) + 0.8;
+        const minZ = Math.min(left.z, right.z) - 0.8,
+          maxZ = Math.max(left.z, right.z) + 0.8;
         targetPosX = Math.max(minX, Math.min(maxX, targetPosX));
         targetPosZ = Math.max(minZ, Math.min(maxZ, targetPosZ));
       } else {
@@ -1466,6 +1510,8 @@ export function createScene(canvas, audioSystem = null) {
             camera.position,
             t.speed || 0,
             !!t.throttle,
+            { x: t.vx || 0, z: t.vz || 0 },
+            { x: cameraVel.x || 0, z: cameraVel.z || 0 },
           );
         } catch {}
       } else if (!isMine) audioSystem?.removeRemoteCar(c.root.name);
@@ -1519,6 +1565,18 @@ export function createScene(canvas, audioSystem = null) {
       const targetRoll = -visualSteer * Math.min(1, t.speed / 24) * 0.075;
       c.chassis.rotation.x += (targetPitch - c.chassis.rotation.x) * alpha;
       c.chassis.rotation.z += (targetRoll - c.chassis.rotation.z) * alpha;
+
+      // Authentic kerb chassis micro-vibration
+      const trackDist = nearest(targetPosX, targetPosZ).distance;
+      const onKerbZone = trackDist >= 9.8 && trackDist <= 11.6;
+      if (onKerbZone && (t.speed || 0) > 7) {
+        c.chassis.position.y =
+          0.28 +
+          Math.sin(now * 0.055) *
+            Math.min(0.022, ((t.speed || 0) / 45) * 0.022);
+      } else {
+        c.chassis.position.y += (0.28 - c.chassis.position.y) * alpha;
+      }
 
       // Wheel spinning & Ackermann steering geometry
       for (const w of c.wheels) {
@@ -1589,11 +1647,24 @@ export function createScene(canvas, audioSystem = null) {
         pz - Math.cos(safeYaw) * camDist + (Math.random() - 0.5) * camShake,
       );
 
-      camera.position = Vector3.Lerp(
-        camera.position,
-        desired,
-        1 - Math.exp(-8 * dt),
-      );
+      // 2nd-order critically damped spring camera follow (eliminates high-speed lag & barrier clipping)
+      const omega = 9.0;
+      const dispX = desired.x - camera.position.x;
+      const dispY = desired.y - camera.position.y;
+      const dispZ = desired.z - camera.position.z;
+
+      if (Math.hypot(dispX, dispZ) > 30) {
+        camera.position.copyFrom(desired);
+        cameraVel.set(0, 0, 0);
+      } else {
+        cameraVel.x += (omega * omega * dispX - 2 * omega * cameraVel.x) * dt;
+        cameraVel.y += (omega * omega * dispY - 2 * omega * cameraVel.y) * dt;
+        cameraVel.z += (omega * omega * dispZ - 2 * omega * cameraVel.z) * dt;
+
+        camera.position.x += cameraVel.x * dt;
+        camera.position.y += cameraVel.y * dt;
+        camera.position.z += cameraVel.z * dt;
+      }
 
       // Validate camera.position sanity
       if (
@@ -1602,6 +1673,7 @@ export function createScene(canvas, audioSystem = null) {
         !Number.isFinite(camera.position.z)
       ) {
         camera.position.copyFrom(desired);
+        cameraVel.set(0, 0, 0);
       }
 
       // Look-ahead target anticipates corners
@@ -1618,13 +1690,17 @@ export function createScene(canvas, audioSystem = null) {
       // Speed FOV expansion (intense tunnel vision at top speed, clamped safely)
       const targetFov = 0.82 + Math.min(0.14, (speed / 50) * 0.14);
       camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-6 * dt));
-      camera.fov = Math.max(0.70, Math.min(0.98, Number.isFinite(camera.fov) ? camera.fov : 0.82));
+      camera.fov = Math.max(
+        0.7,
+        Math.min(0.98, Number.isFinite(camera.fov) ? camera.fov : 0.82),
+      );
     } else {
       // Cinematic orbit in lobby / results
       const t = now * 0.00015;
       camera.fov = 0.82;
       camera.position.set(120 + Math.sin(t) * 75, 55, Math.cos(t) * 75);
       camera.setTarget(new Vector3(120, 2, 0));
+      cameraVel.set(0, 0, 0);
     }
 
     try {
@@ -1646,9 +1722,9 @@ export function createScene(canvas, audioSystem = null) {
     const camTarget = camera.getTarget();
     const camForwardX = camTarget.x - camera.position.x;
     const camForwardZ = camTarget.z - camera.position.z;
-    const camForwardLen = Math.hypot(camForwardX, camForwardZ) || 1;
-    const normForwardX = camForwardX / camForwardLen;
-    const normForwardZ = camForwardZ / camForwardLen;
+    const camForwardLen = Math.hypot(camForwardX, camForwardZ);
+    const normForwardX = camForwardLen > 1e-4 ? camForwardX / camForwardLen : 0;
+    const normForwardZ = camForwardLen > 1e-4 ? camForwardZ / camForwardLen : 1;
     const transformMatrix = scene.getTransformMatrix();
 
     for (const c of [...cars.values()].sort(
@@ -1669,16 +1745,25 @@ export function createScene(canvas, audioSystem = null) {
         continue;
       }
 
-      scratchAnchor.set(c.root.position.x, c.root.position.y + 2.65, c.root.position.z);
+      scratchAnchor.set(
+        c.root.position.x,
+        c.root.position.y + 2.65,
+        c.root.position.z,
+      );
       const projected = Vector3.Project(
         scratchAnchor,
         identityMatrix,
         transformMatrix,
         viewport,
       );
-      const distance = Vector3.Distance(scratchAnchor, camera.position);
-      const x = (projected.x / engine.getRenderWidth()) * innerWidth,
-        y = (projected.y / engine.getRenderHeight()) * innerHeight;
+      const distance = Math.max(
+        0.01,
+        Vector3.Distance(scratchAnchor, camera.position),
+      );
+      const renderW = Math.max(1, engine.getRenderWidth());
+      const renderH = Math.max(1, engine.getRenderHeight());
+      const x = (projected.x / renderW) * innerWidth,
+        y = (projected.y / renderH) * innerHeight;
       const hidden =
         projected.z < 0 ||
         projected.z > 1 ||
@@ -1710,9 +1795,10 @@ export function createScene(canvas, audioSystem = null) {
       localInput = { ...keys };
       inputHistory = history;
     },
-    network: (offset, rtt) => {
+    network: (offset, rtt, stdDev = 0) => {
       serverOffset = offset;
       predictionRtt = rtt;
+      jitterStdDev = stdDev;
     },
     quality: (level) => {
       engine.setHardwareScalingLevel([2, 1.5, 1][level]);
