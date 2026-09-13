@@ -6,26 +6,26 @@ export const TRACK = {
   segments: 180,
 };
 
-// Grand Prix style flowing circuit:
-// Long main straight, high-speed sweeping corners, gentle continuous bends,
-// wide run-offs, and no sudden sharp kinks.
+// Grand Prix style flowing elliptical circuit:
+// Long main straight, high-speed sweeping North & South carousels,
+// gentle flowing left/right transitions, wide run-offs, and no sudden sharp kinks.
 const knots = [
   { x: 120, z: -140 }, // [0] Final bend exit onto main straight
   { x: 120, z: 0 },    // [1] Start / Finish line (s = 0, yaw = 0)
   { x: 120, z: 120 },  // [2] Main straight mid
-  { x: 120, z: 200 },  // [3] Main straight braking zone
-  { x: 90, z: 280 },   // [4] Turn 1: sweeping right entry
-  { x: 20, z: 330 },   // [5] Turn 2: apex of north sweeper
-  { x: -60, z: 320 },  // [6] Turn 2 exit
-  { x: -130, z: 250 }, // [7] Flowing left bend
-  { x: -160, z: 140 }, // [8] Sector 2 entry
-  { x: -110, z: 40 },  // [9] Flowing S-curve right
-  { x: -90, z: -50 },  // [10] Flowing S-curve left
-  { x: -140, z: -140 },// [11] Back straight transition
+  { x: 120, z: 210 },  // [3] Main straight braking zone
+  { x: 92, z: 290 },   // [4] Turn 1: sweeping left-into-turn entry
+  { x: 20, z: 340 },   // [5] Turn 2: North sweeper apex (large radius)
+  { x: -65, z: 335 },  // [6] Turn 2: North sweeper exit
+  { x: -135, z: 270 }, // [7] Turn 3: High speed sweep to back stretch
+  { x: -150, z: 160 }, // [8] Back stretch entry
+  { x: -110, z: 45 },  // [9] Gentle flowing right bend
+  { x: -95, z: -55 },  // [10] Apex of gentle right sweeper
+  { x: -135, z: -155 },// [11] Sweeping left transition
   { x: -160, z: -230 },// [12] South sweeper entry
-  { x: -100, z: -310 },// [13] South carousel apex (large radius)
-  { x: 0, z: -320 },   // [14] South curve exit
-  { x: 90, z: -250 },  // [15] Final wide bend entry
+  { x: -105, z: -320 },// [13] South carousel apex (large radius)
+  { x: 5, z: -330 },   // [14] South curve exit
+  { x: 95, z: -255 },  // [15] Final wide bend entry
 ];
 
 const N = knots.length;

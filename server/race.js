@@ -126,7 +126,7 @@ export class Race {
         this.reset(c);
         c.resetAt = now;
       }
-      c.impact = (c.impact || 0) * Math.exp(-12 * dt);
+      c.impact = (Number.isFinite(c.impact) ? c.impact : 0) * Math.exp(-12 * dt);
       const motion = {
         x: c.b.position.x,
         z: c.b.position.z,
@@ -150,12 +150,46 @@ export class Race {
     this.world.step(dt / 2);
     this.world.step(dt / 2);
 
-    // Multi-pass contact resolution: prevents overlap and exchanges physical impulse
     const bodies = [...this.cars.values()];
-    const frames = new Map(
-      bodies.map((c) => [c, point(nearest(c.b.position.x, c.b.position.z).s)]),
-    );
-    for (let pass = 0; pass < 12; pass++) {
+
+    // 1. Authoritative pairwise collision impulse resolution (elastic bounce with momentum conservation)
+    for (let i = 0; i < bodies.length; i++) {
+      for (let j = i + 1; j < bodies.length; j++) {
+        const a = bodies[i],
+          b = bodies[j];
+        const hit = overlap(
+          { x: a.b.position.x, z: a.b.position.z, yaw: a.yaw },
+          { x: b.b.position.x, z: b.b.position.z, yaw: b.yaw },
+          0.04,
+        );
+        if (!hit) continue;
+
+        const closing =
+          (b.b.velocity.x - a.b.velocity.x) * hit.x +
+          (b.b.velocity.z - a.b.velocity.z) * hit.z;
+        if (closing < 0) {
+          const restitution = 0.45;
+          const impulse = -closing * (1 + restitution) * 0.5;
+          a.b.velocity.x -= hit.x * impulse;
+          a.b.velocity.z -= hit.z * impulse;
+          b.b.velocity.x += hit.x * impulse;
+          b.b.velocity.z += hit.z * impulse;
+
+          const impactMag = Math.min(1, Math.max(0, Math.abs(closing) / 14));
+          a.impact = Math.max(a.impact || 0, impactMag);
+          b.impact = Math.max(b.impact || 0, impactMag);
+
+          // Subtle yaw torque on glancing collisions to deflect nose
+          const crossA = hit.x * Math.cos(a.yaw) - hit.z * Math.sin(a.yaw);
+          const crossB = hit.x * Math.cos(b.yaw) - hit.z * Math.sin(b.yaw);
+          a.yaw += crossA * 0.08 * impactMag;
+          b.yaw -= crossB * 0.08 * impactMag;
+        }
+      }
+    }
+
+    // 2. Iterative non-penetration position relaxation and barrier containment
+    for (let pass = 0; pass < 8; pass++) {
       for (let i = 0; i < bodies.length; i++) {
         for (let j = i + 1; j < bodies.length; j++) {
           const a = bodies[i],
@@ -172,29 +206,13 @@ export class Race {
           b.b.position.x += hit.x * correction;
           b.b.position.z += hit.z * correction;
           a.b.aabbNeedsUpdate = b.b.aabbNeedsUpdate = true;
-
-          const closing =
-            (b.b.velocity.x - a.b.velocity.x) * hit.x +
-            (b.b.velocity.z - a.b.velocity.z) * hit.z;
-          if (closing < 0) {
-            const impulse = -closing * 0.6;
-            a.b.velocity.x -= hit.x * impulse;
-            a.b.velocity.z -= hit.z * impulse;
-            b.b.velocity.x += hit.x * impulse;
-            b.b.velocity.z += hit.z * impulse;
-            const impactMag = Math.min(
-              1,
-              Math.abs(closing) / 10 + hit.depth * 1.5,
-            );
-            a.impact = Math.max(a.impact, impactMag);
-            b.impact = Math.max(b.impact, impactMag);
-          }
         }
       }
-      // Project against the road edge as part of the same contact solve, so a pile-up cannot push a car through a barrier.
+      // Project against road edge inside relaxation
       for (const c of bodies) {
-        const frame = frames.get(c),
-          nx = Math.cos(frame.yaw),
+        const near = nearest(c.b.position.x, c.b.position.z);
+        const frame = point(near.s);
+        const nx = Math.cos(frame.yaw),
           nz = -Math.sin(frame.yaw);
         const offset =
           (c.b.position.x - frame.x) * nx + (c.b.position.z - frame.z) * nz;
@@ -202,7 +220,7 @@ export class Race {
         const extent =
           CAR_HALF_WIDTH * Math.abs(Math.cos(relative)) +
           CAR_HALF_LENGTH * Math.abs(Math.sin(relative));
-        const limit = TRACK.width / 2 - extent - 0.025;
+        const limit = TRACK.width / 2 - extent - 0.02;
         if (Math.abs(offset) > limit) {
           const excess = offset - Math.sign(offset) * limit;
           c.b.position.x -= nx * excess;
@@ -211,20 +229,61 @@ export class Race {
           const outward =
             (c.b.velocity.x * nx + c.b.velocity.z * nz) * Math.sign(offset);
           if (outward > 0) {
-            c.impact = Math.max(c.impact, Math.min(1, outward / 18));
-            c.b.velocity.x -= nx * outward * Math.sign(offset);
-            c.b.velocity.z -= nz * outward * Math.sign(offset);
+            const impactVal = Math.min(1, Math.max(0, outward / 16));
+            c.impact = Math.max(c.impact || 0, impactVal);
+            // Elastic barrier bounce + tangential scrape friction
+            const bounce = outward * 1.25;
+            c.b.velocity.x -= nx * bounce * Math.sign(offset);
+            c.b.velocity.z -= nz * bounce * Math.sign(offset);
+
+            // Tangential friction along wall
+            const tx = -nz, tz = nx;
+            const tangential = c.b.velocity.x * tx + c.b.velocity.z * tz;
+            c.b.velocity.x -= tx * tangential * 0.15;
+            c.b.velocity.z -= tz * tangential * 0.15;
+
+            // Yaw deflection away from wall
+            const wallYaw = frame.yaw + (offset > 0 ? -Math.PI / 2 : Math.PI / 2);
+            const yawDiff = Math.atan2(Math.sin(wallYaw - c.yaw), Math.cos(wallYaw - c.yaw));
+            c.yaw += yawDiff * 0.1 * impactVal;
           }
         }
       }
     }
+
     for (const c of this.cars.values()) {
       c.b.position.y = 0.55;
       c.b.velocity.y = 0;
-      if (running && !c.finished) this.progress(c, now, startAt, dt);
-      c.impact *= Math.exp(-6 * dt);
-      if (nearest(c.b.position.x, c.b.position.z).distance > 45)
+
+      // Sanitize non-finite values safely
+      if (
+        !Number.isFinite(c.b.position.x) ||
+        !Number.isFinite(c.b.position.z) ||
+        !Number.isFinite(c.yaw) ||
+        !Number.isFinite(c.b.velocity.x) ||
+        !Number.isFinite(c.b.velocity.z)
+      ) {
         this.reset(c);
+        continue;
+      }
+
+      // Hard clamp velocity to max physical speed (52 m/s = 187.2 km/h)
+      const currentSpeed = Math.hypot(c.b.velocity.x, c.b.velocity.z);
+      if (currentSpeed > 52) {
+        c.b.velocity.x = (c.b.velocity.x / currentSpeed) * 52;
+        c.b.velocity.z = (c.b.velocity.z / currentSpeed) * 52;
+      }
+
+      c.b.quaternion.setFromEuler(0, c.yaw, 0);
+
+      if (running && !c.finished) this.progress(c, now, startAt, dt);
+      c.impact = (c.impact || 0) * Math.exp(-6 * dt);
+      if (!Number.isFinite(c.impact)) c.impact = 0;
+
+      const trackDist = nearest(c.b.position.x, c.b.position.z).distance;
+      if (!Number.isFinite(trackDist) || trackDist > 45) {
+        this.reset(c);
+      }
     }
   }
   progress(c, now, startAt, dt = 0) {

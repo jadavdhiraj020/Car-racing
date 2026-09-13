@@ -1275,10 +1275,11 @@ export function createScene(canvas, audioSystem = null) {
   const identityMatrix = Matrix.Identity();
 
   engine.runRenderLoop(() => {
-    const now = performance.now(),
-      dt = Math.min((now - last) / 1000, 0.05);
-    last = now;
-    smokeClock += dt;
+    try {
+      const now = performance.now(),
+        dt = Math.min(Math.max(0.001, (now - last) / 1000), 0.05);
+      last = now;
+      smokeClock += dt;
 
     // Dissipate tire smoke particles
     for (const puff of smoke) {
@@ -1348,11 +1349,18 @@ export function createScene(canvas, audioSystem = null) {
 
       let targetPosX, targetPosZ;
       if (
-        !(left.impact > 0.05 || right.impact > 0.05) &&
+        !(left.impact > 0.03 || right.impact > 0.03 || t.impact > 0.03) &&
         (Math.hypot(vx0, vz0) > 0.01 || Math.hypot(vx1, vz1) > 0.01)
       ) {
         targetPosX = h00 * left.x + h10 * vx0 + h01 * right.x + h11 * vx1;
         targetPosZ = h00 * left.z + h10 * vz0 + h01 * right.z + h11 * vz1;
+        // Clamp Hermite overshoot to sample bounds + 1.2m
+        const minX = Math.min(left.x, right.x) - 1.2,
+          maxX = Math.max(left.x, right.x) + 1.2;
+        const minZ = Math.min(left.z, right.z) - 1.2,
+          maxZ = Math.max(left.z, right.z) + 1.2;
+        targetPosX = Math.max(minX, Math.min(maxX, targetPosX));
+        targetPosZ = Math.max(minZ, Math.min(maxZ, targetPosZ));
       } else {
         targetPosX = left.x + (right.x - left.x) * tNorm;
         targetPosZ = left.z + (right.z - left.z) * tNorm;
@@ -1375,7 +1383,7 @@ export function createScene(canvas, audioSystem = null) {
         (other) =>
           other.id !== t.id && Math.hypot(other.x - t.x, other.z - t.z) < 13,
       );
-      if (sinceLatest > 0 && !nearContact && !(t.impact > 0.05)) {
+      if (sinceLatest > 0 && !nearContact && !(t.impact > 0.03)) {
         const ahead = {
           x: targetPosX + (right.vx || 0) * sinceLatest,
           z: targetPosZ + (right.vz || 0) * sinceLatest,
@@ -1385,15 +1393,17 @@ export function createScene(canvas, audioSystem = null) {
           targetPosZ = ahead.z;
         }
       }
+      const hasImpact = (t.impact || 0) > 0.03 || (left.impact || 0) > 0.03 || (right.impact || 0) > 0.03;
       const canPredict =
         isMine &&
         currentPhase === "racing" &&
         t.finished === null &&
         !localInput.reset &&
         !nearContact &&
+        !hasImpact &&
         now - c.samples.at(-1).at < 180 &&
-        !(t.impact > 0.05) &&
         nearest(t.x, t.z).distance < TRACK.width / 2 - 3;
+      if (hasImpact) c.predBlend = 0;
       c.predBlend =
         (c.predBlend || 0) +
         ((canPredict ? 1 : 0) - (c.predBlend || 0)) * (1 - Math.exp(-18 * dt));
@@ -1554,22 +1564,29 @@ export function createScene(canvas, audioSystem = null) {
     if (racing && mine && mine.target) {
       const p = mine.root.position,
         yaw = mine.root.rotation.y,
-        speed = mine.target.speed;
+        speed = Number.isFinite(mine.target.speed) ? Math.max(0, mine.target.speed) : 0;
 
       // Screen shake impulse on impact
-      if (mine.target.impact > (mine.cameraImpact || 0) + 0.06)
-        camShake = Math.min(0.12, mine.target.impact * 0.1);
-      mine.cameraImpact = mine.target.impact || 0;
+      const safeImpact = Number.isFinite(mine.target.impact) ? mine.target.impact : 0;
+      if (safeImpact > (mine.cameraImpact || 0) + 0.06)
+        camShake = Math.min(0.12, safeImpact * 0.08);
+      mine.cameraImpact = safeImpact;
       camShake *= Math.exp(-9 * dt);
+      if (!Number.isFinite(camShake)) camShake = 0;
 
       // Smooth chase camera distance and height
       const camDist = 10.6 + Math.min(1.8, speed * 0.035);
       const camHeight = 4.2 + Math.min(0.6, speed * 0.012);
 
+      const px = Number.isFinite(p.x) ? p.x : 120;
+      const py = Number.isFinite(p.y) ? p.y : 0.55;
+      const pz = Number.isFinite(p.z) ? p.z : 0;
+      const safeYaw = Number.isFinite(yaw) ? yaw : 0;
+
       const desired = new Vector3(
-        p.x - Math.sin(yaw) * camDist + (Math.random() - 0.5) * camShake,
-        p.y + camHeight + (Math.random() - 0.5) * camShake,
-        p.z - Math.cos(yaw) * camDist + (Math.random() - 0.5) * camShake,
+        px - Math.sin(safeYaw) * camDist + (Math.random() - 0.5) * camShake,
+        py + camHeight + (Math.random() - 0.5) * camShake,
+        pz - Math.cos(safeYaw) * camDist + (Math.random() - 0.5) * camShake,
       );
 
       camera.position = Vector3.Lerp(
@@ -1578,18 +1595,30 @@ export function createScene(canvas, audioSystem = null) {
         1 - Math.exp(-8 * dt),
       );
 
+      // Validate camera.position sanity
+      if (
+        !Number.isFinite(camera.position.x) ||
+        !Number.isFinite(camera.position.y) ||
+        !Number.isFinite(camera.position.z)
+      ) {
+        camera.position.copyFrom(desired);
+      }
+
       // Look-ahead target anticipates corners
       const lookDist = 7.5 + Math.min(5.5, speed * 0.12);
       const lookTarget = new Vector3(
-        p.x + Math.sin(yaw) * lookDist,
-        p.y + 1.25,
-        p.z + Math.cos(yaw) * lookDist,
+        px + Math.sin(safeYaw) * lookDist,
+        py + 1.25,
+        pz + Math.cos(safeYaw) * lookDist,
       );
-      camera.setTarget(lookTarget);
+      if (Vector3.DistanceSquared(camera.position, lookTarget) > 0.01) {
+        camera.setTarget(lookTarget);
+      }
 
-      // Speed FOV expansion (intense tunnel vision at top speed)
+      // Speed FOV expansion (intense tunnel vision at top speed, clamped safely)
       const targetFov = 0.82 + Math.min(0.14, (speed / 50) * 0.14);
       camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-6 * dt));
+      camera.fov = Math.max(0.70, Math.min(0.98, Number.isFinite(camera.fov) ? camera.fov : 0.82));
     } else {
       // Cinematic orbit in lobby / results
       const t = now * 0.00015;
@@ -1598,10 +1627,14 @@ export function createScene(canvas, audioSystem = null) {
       camera.setTarget(new Vector3(120, 2, 0));
     }
 
-    audioSystem?.listener(
-      camera.position,
-      camera.getTarget().subtract(camera.position).normalize(),
-    );
+    try {
+      const fwd = camera.getTarget().subtract(camera.position);
+      const fwdLen = fwd.length();
+      if (fwdLen > 0.001) {
+        fwd.scaleInPlace(1 / fwdLen);
+        audioSystem?.listener(camera.position, fwd);
+      }
+    } catch {}
     scene.render();
 
     // Floating broadcast driver tags: positioned safely above car (+2.65m)
@@ -1664,7 +1697,10 @@ export function createScene(canvas, audioSystem = null) {
         c.label.style.opacity = String(Math.min(1, (150 - distance) / 25));
       }
     }
-  });
+  } catch (err) {
+    console.warn("Render loop error handled safely:", err);
+  }
+});
 
   window.addEventListener("resize", () => engine.resize());
 

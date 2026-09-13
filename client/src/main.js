@@ -215,7 +215,8 @@ const esc = (s) =>
   );
 
 const time = (ms) => {
-  const s = Math.max(0, ms) / 1000;
+  const safeMs = Number.isFinite(ms) && ms > 0 ? ms : 0;
+  const s = safeMs / 1000;
   return `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 };
 
@@ -513,10 +514,11 @@ function updateHud() {
   updateCountdown();
   const c = state.cars.find((c) => c.id === socket.id);
   if (!c) return;
-  $("lap").textContent = `${Math.min(3, Math.floor(c.passed / 24) + 1)} / 3`;
+  $("lap").textContent = `${Math.min(3, Math.floor((c.passed || 0) / 24) + 1)} / 3`;
   $("position").textContent =
     `${ordered().findIndex((p) => p.id === c.id) + 1} / ${state.players.length}`;
-  $("speed").textContent = Math.round(c.speed * 3.6);
+  const safeSpeed = Number.isFinite(c.speed) ? Math.max(0, Math.round(c.speed * 3.6)) : 0;
+  $("speed").textContent = safeSpeed;
   $("timer").textContent = time(c.finished ?? elapsed);
   $("finishMessage").textContent =
     c.finished !== null
@@ -528,63 +530,74 @@ function updateHud() {
 
 function frame() {
   requestAnimationFrame(frame);
-  sendInput();
-  if (!state) {
-    if (sound) engineAudio.silence();
-    return;
-  }
-  const c = state.cars.find((c) => c.id === socket.id);
-  if (!c) return;
-  updateHud();
-
-  // Dynamic engine audio & kerb rumble updates
-  const distFromCenter = nearest(c.x, c.z).distance;
-  const onKerb = Math.abs(distFromCenter - 10.6) < 1.35;
-  engineAudio.update(
-    c.speed,
-    !!keys.up,
-    !!keys.down,
-    !!keys.drift,
-    state.phase === "racing",
-    c.finished !== null,
-    onKerb,
-  );
-
-  if (sound) engineAudio.impact(c.impact || 0);
-  $("gear").textContent =
-    keys.down && c.speed < 2
-      ? "R"
-      : state.phase !== "racing"
-        ? "N"
-        : engineAudio.gear;
-  const rpmPercent = Math.min(
-    100,
-    Math.max(0, (engineAudio.rpm / 13500) * 100),
-  );
-  $("rpm").style.setProperty("--rpm", rpmPercent);
-  $("rpm").classList.toggle("shift-blink", engineAudio.rpm > 12400);
-  view?.input(keys, inputHistory);
-  if (performance.now() - lastMap < 50) return;
-  lastMap = performance.now();
-  // 2D Circuit Minimap (scaled for the new grand-prix circuit)
-  map.clearRect(0, 0, 180, 200);
-  map.drawImage(mapBg, 0, 0);
-
-  // Player dots
-  for (const p of state.players) {
-    const t = state.cars.find((c) => c.id === p.id);
-    if (!t) continue;
-    const cx = toCX(t.x),
-      cy = toCY(t.z);
-    map.fillStyle = p.color;
-    map.beginPath();
-    map.arc(cx, cy, p.id === socket.id ? 5 : 3.5, 0, Math.PI * 2);
-    map.fill();
-    if (p.id === socket.id) {
-      map.strokeStyle = "#ffffff";
-      map.lineWidth = 1.5;
-      map.stroke();
+  try {
+    sendInput();
+    if (!state) {
+      if (sound) engineAudio.silence();
+      return;
     }
+    const c = state.cars.find((c) => c.id === socket.id);
+    if (!c) return;
+    updateHud();
+
+    // Dynamic engine audio & kerb rumble updates
+    const safeX = Number.isFinite(c.x) ? c.x : 0;
+    const safeZ = Number.isFinite(c.z) ? c.z : 0;
+    const distFromCenter = nearest(safeX, safeZ).distance;
+    const onKerb = Math.abs(distFromCenter - 10.6) < 1.35;
+    try {
+      engineAudio.update(
+        Number.isFinite(c.speed) ? c.speed : 0,
+        !!keys.up,
+        !!keys.down,
+        !!keys.drift,
+        state.phase === "racing",
+        c.finished !== null,
+        onKerb,
+      );
+
+      if (sound) engineAudio.impact(Number.isFinite(c.impact) ? c.impact : 0);
+    } catch {}
+
+    $("gear").textContent =
+      keys.down && (c.speed || 0) < 2
+        ? "R"
+        : state.phase !== "racing"
+          ? "N"
+          : (engineAudio.gear || "1");
+    const safeRpm = Number.isFinite(engineAudio?.rpm) ? engineAudio.rpm : 1000;
+    const rpmPercent = Math.min(
+      100,
+      Math.max(0, (safeRpm / 13500) * 100),
+    );
+    $("rpm").style.setProperty("--rpm", rpmPercent.toFixed(1));
+    $("rpm").classList.toggle("shift-blink", safeRpm > 12400);
+    view?.input(keys, inputHistory);
+    if (performance.now() - lastMap < 50) return;
+    lastMap = performance.now();
+    // 2D Circuit Minimap (scaled for the new grand-prix circuit)
+    map.clearRect(0, 0, 180, 200);
+    map.drawImage(mapBg, 0, 0);
+
+    // Player dots
+    for (const p of state.players) {
+      const t = state.cars.find((c) => c.id === p.id);
+      if (!t || !Number.isFinite(t.x) || !Number.isFinite(t.z)) continue;
+      const cx = toCX(t.x),
+        cy = toCY(t.z);
+      if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+      map.fillStyle = p.color || "#fff";
+      map.beginPath();
+      map.arc(cx, cy, p.id === socket.id ? 5 : 3.5, 0, Math.PI * 2);
+      map.fill();
+      if (p.id === socket.id) {
+        map.strokeStyle = "#ffffff";
+        map.lineWidth = 1.5;
+        map.stroke();
+      }
+    }
+  } catch (err) {
+    console.warn("Frame loop exception handled:", err);
   }
 }
 frame();

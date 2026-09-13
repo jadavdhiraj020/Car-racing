@@ -284,87 +284,89 @@ export class EngineAudio {
     if (!Number.isFinite(this.boost)) this.boost = 0;
 
     if (!this.ctx || !this.enabled) return;
-    const t = this.ctx.currentTime;
-    this.master.gain.setTargetAtTime(racing && !finished ? 0.4 : 0.14, t, 0.06);
-    this.effects.gain.setTargetAtTime(0.25, t, 0.03);
-    const isShifting = now < this.shiftUntil && this.shiftType === "up";
+    try {
+      const t = this.ctx.currentTime;
+      this.master.gain.setTargetAtTime(racing && !finished ? 0.4 : 0.14, t, 0.06);
+      this.effects.gain.setTargetAtTime(0.25, t, 0.03);
+      const isShifting = now < this.shiftUntil && this.shiftType === "up";
 
-    // High-RPM rev limiter bouncing at redline
-    let limiterCut = 1.0;
-    if (this.rpm > 13150 && throttle) {
-      limiterCut = Math.sin(now * 0.08) > 0.1 ? 1.0 : 0.06;
-      if (limiterCut < 0.5 && Math.random() < 0.25) {
-        this.exhaustPop(0.35);
+      // High-RPM rev limiter bouncing at redline
+      let limiterCut = 1.0;
+      if (this.rpm > 13150 && throttle) {
+        limiterCut = Math.sin(now * 0.08) > 0.1 ? 1.0 : 0.06;
+        if (limiterCut < 0.5 && Math.random() < 0.25) {
+          this.exhaustPop(0.35);
+        }
       }
-    }
 
-    // F1 engine acoustics: fundamental cylinder firing frequency
-    // (V6 at 12,000 RPM fires 600 times per second)
-    const baseFreq = Math.max(38, (this.rpm / 60) * 1.5);
-    const cut = (isShifting ? 0.15 : 1.0) * limiterCut;
+      // F1 engine acoustics: fundamental cylinder firing frequency
+      // (V6 at 12,000 RPM fires 600 times per second)
+      const baseFreq = Math.max(38, (this.rpm / 60) * 1.5);
+      const cut = (isShifting ? 0.15 : 1.0) * limiterCut;
 
-    // Frequency modulation for organic combustion feel
-    const jitter = Math.sin(now * 0.08) * 1.5;
-    this.subOsc.frequency.setTargetAtTime(baseFreq * 0.5, t, 0.02);
-    this.midOsc.frequency.setTargetAtTime(baseFreq + jitter, t, 0.02);
-    this.highOsc.frequency.setTargetAtTime(
-      baseFreq * 2 + jitter * 1.8,
-      t,
-      0.02,
-    );
-    this.raspOsc.frequency.setTargetAtTime(baseFreq * 3, t, 0.02);
+      // Frequency modulation for organic combustion feel
+      const jitter = Math.sin(now * 0.08) * 1.5;
+      this.subOsc.frequency.setTargetAtTime(baseFreq * 0.5, t, 0.02);
+      this.midOsc.frequency.setTargetAtTime(baseFreq + jitter, t, 0.02);
+      this.highOsc.frequency.setTargetAtTime(
+        baseFreq * 2 + jitter * 1.8,
+        t,
+        0.02,
+      );
+      this.raspOsc.frequency.setTargetAtTime(baseFreq * 3, t, 0.02);
 
-    // Turbo whistle tracks boost pressure and RPM
-    const turboFreq = 2200 + this.boost * 2400 + (this.rpm / this.maxRpm) * 800;
-    this.turboOsc.frequency.setTargetAtTime(turboFreq, t, 0.03);
-    this.turboGain.gain.setTargetAtTime(
-      racing ? this.boost * 0.14 : 0,
-      t,
-      0.05,
-    );
+      // Turbo whistle tracks boost pressure and RPM
+      const turboFreq = 2200 + this.boost * 2400 + (this.rpm / this.maxRpm) * 800;
+      this.turboOsc.frequency.setTargetAtTime(turboFreq, t, 0.03);
+      this.turboGain.gain.setTargetAtTime(
+        racing ? this.boost * 0.14 : 0,
+        t,
+        0.05,
+      );
 
-    // Formant acoustic filters
-    const filterCutoff = Math.min(
-      7500,
-      Math.max(
-        450,
-        700 + (this.rpm / this.maxRpm) * 5800 * (throttle ? 1.35 : 0.65),
-      ),
-    );
-    this.intakeFilter.frequency.setTargetAtTime(filterCutoff, t, 0.03);
-    this.screamerFilter.frequency.setTargetAtTime(
-      1400 + (this.rpm / this.maxRpm) * 2200,
-      t,
-      0.04,
-    );
+      // Formant acoustic filters
+      const filterCutoff = Math.min(
+        7500,
+        Math.max(
+          450,
+          700 + (this.rpm / this.maxRpm) * 5800 * (throttle ? 1.35 : 0.65),
+        ),
+      );
+      this.intakeFilter.frequency.setTargetAtTime(filterCutoff, t, 0.03);
+      this.screamerFilter.frequency.setTargetAtTime(
+        1400 + (this.rpm / this.maxRpm) * 2200,
+        t,
+        0.04,
+      );
 
-    // Engine volume
-    const baseGain = racing && !finished ? (throttle ? 0.62 : 0.38) : 0.22;
-    this.engineGain.gain.setTargetAtTime(baseGain * cut, t, 0.03);
+      // Engine volume
+      const baseGain = racing && !finished ? (throttle ? 0.62 : 0.38) : 0.22;
+      this.engineGain.gain.setTargetAtTime(baseGain * cut, t, 0.03);
 
-    // Aerodynamic high-speed wind roar
-    const windIntensity = Math.min(1, Math.max(0, (speed - 15) / 35));
-    this.windGain.gain.setTargetAtTime(windIntensity * 0.28, t, 0.06);
-    this.windFilter.frequency.setTargetAtTime(
-      500 + windIntensity * 1600,
-      t,
-      0.06,
-    );
+      // Aerodynamic high-speed wind roar
+      const windIntensity = Math.min(1, Math.max(0, (safeSpeed - 15) / 35));
+      this.windGain.gain.setTargetAtTime(windIntensity * 0.28, t, 0.06);
+      this.windFilter.frequency.setTargetAtTime(
+        500 + windIntensity * 1600,
+        t,
+        0.06,
+      );
 
-    // Tire squeal (drift or heavy braking)
-    const isDrifting = drift && speed > 8;
-    const isLockingBrakes = brake && speed > 16;
-    const skidIntensity = isDrifting ? 0.38 : isLockingBrakes ? 0.26 : 0;
-    this.skidGain.gain.setTargetAtTime(skidIntensity, t, 0.04);
-    this.skidFilter.frequency.setTargetAtTime(
-      isDrifting ? 1450 : 1850,
-      t,
-      0.04,
-    );
+      // Tire squeal (drift or heavy braking)
+      const isDrifting = drift && safeSpeed > 8;
+      const isLockingBrakes = brake && safeSpeed > 16;
+      const skidIntensity = isDrifting ? 0.38 : isLockingBrakes ? 0.26 : 0;
+      this.skidGain.gain.setTargetAtTime(skidIntensity, t, 0.04);
+      this.skidFilter.frequency.setTargetAtTime(
+        isDrifting ? 1450 : 1850,
+        t,
+        0.04,
+      );
 
-    // Apex kerb rumble
-    const kerbIntensity = onKerb && speed > 6 ? Math.min(0.4, speed / 60) : 0;
-    this.kerbGain.gain.setTargetAtTime(kerbIntensity, t, 0.03);
+      // Apex kerb rumble
+      const kerbIntensity = onKerb && safeSpeed > 6 ? Math.min(0.4, safeSpeed / 60) : 0;
+      this.kerbGain.gain.setTargetAtTime(kerbIntensity, t, 0.03);
+    } catch {}
   }
 
   exhaustPop(intensity = 0.6) {
@@ -501,28 +503,34 @@ export class EngineAudio {
   }
 
   impact(amount) {
-    if (amount > 0.12 && performance.now() - this.lastImpact > 180) {
-      this.lastImpact = performance.now();
-      const t = this.ctx?.currentTime;
-      if (!t || !this.enabled) return;
+    try {
+      if (!Number.isFinite(amount)) return;
+      const safeAmount = Math.min(1.0, Math.max(0, amount));
+      if (safeAmount > 0.12 && performance.now() - this.lastImpact > 180) {
+        this.lastImpact = performance.now();
+        const t = this.ctx?.currentTime;
+        if (!t || !this.enabled || !this.effects) return;
 
-      // Heavy body/barrier thud
-      const o = this.ctx.createOscillator();
-      const g = this.ctx.createGain();
-      o.type = "sawtooth";
-      o.frequency.setValueAtTime(80 + amount * 60, t);
-      o.frequency.exponentialRampToValueAtTime(25, t + 0.16);
-      g.gain.setValueAtTime(Math.min(0.8, amount * 0.7), t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
-      o.connect(g);
-      g.connect(this.effects);
-      o.start(t);
-      o.stop(t + 0.16);
-      o.onended = () => {
-        o.disconnect();
-        g.disconnect();
-      };
-    }
+        // Heavy body/barrier thud
+        const o = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        o.type = "sawtooth";
+        o.frequency.setValueAtTime(80 + safeAmount * 60, t);
+        o.frequency.exponentialRampToValueAtTime(25, t + 0.16);
+        g.gain.setValueAtTime(Math.min(0.8, safeAmount * 0.7), t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+        o.connect(g);
+        g.connect(this.effects);
+        o.start(t);
+        o.stop(t + 0.16);
+        o.onended = () => {
+          try {
+            o.disconnect();
+            g.disconnect();
+          } catch {}
+        };
+      }
+    } catch {}
   }
 
   celebrate() {
