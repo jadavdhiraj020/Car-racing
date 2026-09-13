@@ -17,177 +17,10 @@ let view,
   lastPhase = "",
   quality = 1;
 
-// Procedural multi-harmonic engine audio system
-class EngineAudio {
-  constructor() {
-    this.ctx = null;
-    this.master = null;
-    this.subOsc = null;
-    this.coreOsc = null;
-    this.roarOsc = null;
-    this.filter = null;
-    this.skidGain = null;
-    this.skidFilter = null;
-    this.skidSource = null;
-    this.rpm = 950;
-    this.active = false;
-  }
+window.__getState = () => state;
+window.__getKeys = () => keys;
 
-  init() {
-    if (this.ctx) {
-      if (this.ctx.state === "suspended") this.ctx.resume();
-      return;
-    }
-    const AC = window.AudioContext || window.webkitAudioContext;
-    this.ctx = new AC();
-    const t = this.ctx.currentTime;
-
-    // Master volume gain
-    this.master = this.ctx.createGain();
-    this.master.gain.setValueAtTime(0, t);
-    this.master.connect(this.ctx.destination);
-
-    // Warm soft-clipping saturation
-    const waveshaper = this.ctx.createWaveShaper();
-    const curve = new Float32Array(256);
-    for (let i = 0; i < 256; i++) {
-      const x = (i * 2) / 256 - 1;
-      curve[i] = ((Math.PI + 3) * x) / (Math.PI + 3 * Math.abs(x));
-    }
-    waveshaper.curve = curve;
-    waveshaper.connect(this.master);
-
-    // Resonant intake / throttle filter
-    this.filter = this.ctx.createBiquadFilter();
-    this.filter.type = "lowpass";
-    this.filter.frequency.setValueAtTime(450, t);
-    this.filter.Q.setValueAtTime(2.2, t);
-    this.filter.connect(waveshaper);
-
-    // Sub-bass oscillator (deep fundamental chassis rumble)
-    this.subOsc = this.ctx.createOscillator();
-    this.subOsc.type = "triangle";
-    this.subOsc.frequency.setValueAtTime(35, t);
-    const subGain = this.ctx.createGain();
-    subGain.gain.setValueAtTime(0.09, t);
-    this.subOsc.connect(subGain);
-    subGain.connect(this.master);
-    this.subOsc.start();
-
-    // Core cylinder combustion oscillator
-    this.coreOsc = this.ctx.createOscillator();
-    this.coreOsc.type = "sawtooth";
-    this.coreOsc.frequency.setValueAtTime(70, t);
-    const coreGain = this.ctx.createGain();
-    coreGain.gain.setValueAtTime(0.045, t);
-    this.coreOsc.connect(coreGain);
-    coreGain.connect(this.filter);
-    this.coreOsc.start();
-
-    // Exhaust roar oscillator (higher cylinder harmonics)
-    this.roarOsc = this.ctx.createOscillator();
-    this.roarOsc.type = "sawtooth";
-    this.roarOsc.frequency.setValueAtTime(140, t);
-    const roarGain = this.ctx.createGain();
-    roarGain.gain.setValueAtTime(0.025, t);
-    this.roarOsc.connect(roarGain);
-    roarGain.connect(this.filter);
-    this.roarOsc.start();
-
-    // Tire skid screech noise buffer
-    const bufferSize = this.ctx.sampleRate * 2;
-    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const output = noiseBuffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
-
-    this.skidSource = this.ctx.createBufferSource();
-    this.skidSource.buffer = noiseBuffer;
-    this.skidSource.loop = true;
-
-    this.skidFilter = this.ctx.createBiquadFilter();
-    this.skidFilter.type = "bandpass";
-    this.skidFilter.frequency.setValueAtTime(1150, t);
-    this.skidFilter.Q.setValueAtTime(3.2, t);
-
-    this.skidGain = this.ctx.createGain();
-    this.skidGain.gain.setValueAtTime(0, t);
-
-    this.skidSource.connect(this.skidFilter);
-    this.skidFilter.connect(this.skidGain);
-    this.skidGain.connect(this.master);
-    this.skidSource.start();
-
-    this.active = true;
-  }
-
-  update(speed, isAccelerating, isBraking, isDrifting, isRacing, isFinished) {
-    if (!this.ctx || !this.active) return;
-    if (this.ctx.state === "suspended") this.ctx.resume();
-
-    const t = this.ctx.currentTime;
-    if (!isRacing || isFinished) {
-      this.master.gain.setTargetAtTime(0, t, 0.15);
-      return;
-    }
-
-    this.master.gain.setTargetAtTime(0.85, t, 0.1);
-
-    // Multi-gear RPM calculation (1st to 4th gear)
-    const absSpeed = Math.abs(speed);
-    let gearRatio = 0;
-    if (absSpeed < 13) gearRatio = absSpeed / 13;
-    else if (absSpeed < 25) gearRatio = (absSpeed - 11) / 14;
-    else if (absSpeed < 38) gearRatio = (absSpeed - 22) / 16;
-    else gearRatio = Math.min(1.0, (absSpeed - 35) / 18);
-
-    let targetRpm = 950 + gearRatio * 5200;
-    if (isAccelerating) targetRpm += 850;
-    if (isBraking) targetRpm = Math.max(850, targetRpm - 600);
-
-    // Smooth RPM response
-    this.rpm += (targetRpm - this.rpm) * 0.14;
-
-    // Frequencies derived from engine RPM
-    const baseFreq = Math.max(30, (this.rpm / 60) * 1.6);
-    this.subOsc.frequency.setTargetAtTime(baseFreq * 0.5, t, 0.08);
-    this.coreOsc.frequency.setTargetAtTime(baseFreq, t, 0.08);
-    this.roarOsc.frequency.setTargetAtTime(baseFreq * 2.0, t, 0.08);
-
-    // Resonant intake filter: opens on throttle, closes on overrun
-    let filterFreq = 420 + (this.rpm / 7000) * 1300;
-    if (isAccelerating) filterFreq += 1800;
-    if (isBraking) filterFreq = Math.max(380, filterFreq * 0.7);
-    this.filter.frequency.setTargetAtTime(filterFreq, t, 0.09);
-
-    // Tire skid sound during drift or hard braking
-    let skidVolume = 0;
-    if (isDrifting && absSpeed > 6) skidVolume = 0.06 + Math.min(0.07, absSpeed / 200);
-    else if (isBraking && absSpeed > 18) skidVolume = 0.035;
-    this.skidGain.gain.setTargetAtTime(skidVolume, t, 0.08);
-  }
-
-  beep(freq = 600, duration = 0.12) {
-    if (!this.ctx) return;
-    try {
-      const o = this.ctx.createOscillator(),
-        g = this.ctx.createGain(),
-        t = this.ctx.currentTime;
-      o.connect(g);
-      g.connect(this.ctx.destination);
-      o.frequency.value = freq;
-      g.gain.setValueAtTime(0.08, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + duration);
-      o.start(t);
-      o.stop(t + duration);
-    } catch {}
-  }
-
-  mute() {
-    if (this.master && this.ctx) {
-      this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
-    }
-  }
-}
+import {EngineAudio} from "./audio.js";
 
 const engineAudio = new EngineAudio();
 
@@ -212,9 +45,9 @@ function beep(freq = 600, duration = 0.12) {
   engineAudio.beep(freq, duration);
 }
 
-$("sound").onclick = () => {
+$("sound").onclick = async () => {
   sound = !sound;
-  if (sound) engineAudio.init();
+  if (sound) {try {await engineAudio.init();}catch {sound=false;notice("Audio could not start. Try Chrome or Edge over HTTPS.");}}
   else engineAudio.mute();
   $("sound").textContent = sound ? "SOUND ON" : "SOUND OFF";
 };
@@ -386,9 +219,15 @@ socket.on("state", (s) => {
   if (!s || !Array.isArray(s.cars) || !Array.isArray(s.players)) return;
   state = s;
   offset = s.serverNow - Date.now();
-  view?.update(s, socket.id);
+  try {
+    view?.update(s, socket.id);
+  } catch (err) {
+    console.warn("View update warning:", err);
+  }
   if (lastPhase !== s.phase) {
-    if (s.phase === "results") beep(900, 0.6);
+    if (s.phase === "results") { if(sound) engineAudio.celebrate();
+      document.querySelectorAll('.confetti').forEach(e=>e.remove());
+      for(let i=0;i<28;i++){const piece=document.createElement('i');piece.className='confetti';piece.style.cssText='--x:'+((i*37)%100)+'vw;--delay:'+(i%7)*.09+'s;--hue:'+(i*43)+';';document.body.append(piece);setTimeout(()=>piece.remove(),4500);} document.getElementById("results").classList.remove("celebrate"); requestAnimationFrame(()=>document.getElementById("results").classList.add("celebrate")); }
     lastPhase = s.phase;
   }
   render();
@@ -402,27 +241,55 @@ socket.on("state", (s) => {
 const bindings = {
   KeyW: "up",
   ArrowUp: "up",
+  Numpad8: "up",
+  Digit8: "up",
   KeyS: "down",
   ArrowDown: "down",
+  Numpad2: "down",
+  Digit2: "down",
   KeyA: "left",
   ArrowLeft: "left",
+  Numpad4: "left",
+  Digit4: "left",
   KeyD: "right",
   ArrowRight: "right",
+  Numpad6: "right",
+  Digit6: "right",
   Space: "drift",
+  Numpad0: "drift",
+  Numpad5: "drift",
   KeyR: "reset",
+  NumpadEnter: "reset",
 };
+
+function resolveKey(e) {
+  return (
+    bindings[e.code] ||
+    (e.key === "8"
+      ? "up"
+      : e.key === "2"
+        ? "down"
+        : e.key === "4"
+          ? "left"
+          : e.key === "6"
+            ? "right"
+            : null)
+  );
+}
 
 window.addEventListener("keydown", (e) => {
   if (e.target instanceof HTMLInputElement) return;
-  const key = bindings[e.code];
+  const key = resolveKey(e);
   if (key && state) {
     e.preventDefault();
     keys[key] = true;
+    sendInput();
   }
 });
 
 window.addEventListener("keyup", (e) => {
-  if (bindings[e.code]) keys[bindings[e.code]] = false;
+  const key = resolveKey(e);
+  if (key) {keys[key] = false;sendInput();}
 });
 
 window.addEventListener("blur", () => {
@@ -438,6 +305,7 @@ document.querySelectorAll("[data-key]").forEach((b) => {
     e.preventDefault();
     b.setPointerCapture(e.pointerId);
     keys[b.dataset.key] = true;
+    sendInput();
   };
   b.onpointerup =
     b.onpointercancel =
@@ -445,12 +313,20 @@ document.querySelectorAll("[data-key]").forEach((b) => {
       () => (keys[b.dataset.key] = false);
 });
 
-setInterval(() => {
-  if (state && socket.connected) socket.volatile.emit("input", keys);
-}, 1000 / 30);
+let lastInputSent = 0;
+function sendInput() {
+  view?.input(keys);
+  const now = performance.now();
+  if (state && socket.connected && now - lastInputSent >= 25) {
+    socket.emit("input", keys);
+    lastInputSent = now;
+  }
+}
+setInterval(sendInput, 1000 / 30);
 
 function frame() {
   requestAnimationFrame(frame);
+  sendInput();
   if (!state) {
     if (sound) engineAudio.mute();
     return;
@@ -469,6 +345,7 @@ function frame() {
   if (count !== lastCountdown) {
     if (count) beep(count === "GO!" ? 900 : 500);
     lastCountdown = count;
+    $("countdown").classList.remove("pulse"); void $("countdown").offsetWidth; if(count) $("countdown").classList.add("pulse");
   }
   $("lap").textContent = `${Math.min(3, Math.floor(c.passed / 24) + 1)} / 3`;
   $("position").textContent =
@@ -483,7 +360,7 @@ function frame() {
         : "";
 
   // Dynamic engine audio updates
-  if (sound) {
+  {
     engineAudio.update(
       c.speed,
       !!keys.up,
@@ -494,6 +371,10 @@ function frame() {
     );
   }
 
+  if(sound) engineAudio.impact(c.impact||0);
+  $("gear").textContent = keys.down && c.speed<2 ? "R" : engineAudio.gear;
+  $("rpm").style.setProperty("--rpm", Math.min(100,engineAudio.rpm/145));
+  view?.input(keys);
   // 2D Circuit Minimap (scaled for the new grand-prix circuit)
   map.clearRect(0, 0, 180, 200);
   const toCX = (x) => 95 + (x + 20) * 0.23;

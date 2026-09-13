@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="theme-color" content="#122620" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏎️</text></svg>" />
     <title>APEX — Friends on the grid</title>
   </head>
   <body>
@@ -71,7 +72,7 @@
         <button class="leave small">LEAVE</button>
       </div>
       <div id="leaderboard" class="panel"></div>
-      <div class="speed"><strong id="speed">0</strong><span>KM/H</span></div>
+      <div class="speed"><div class="rev-meter" id="rpm"><i></i></div><div class="gear-badge">GEAR <b id="gear">1</b></div><strong id="speed">0</strong><span>KM/H</span></div>
       <div id="finishMessage"></div>
       <div id="countdown"></div>
       <canvas id="minimap" width="180" height="200"></canvas>
@@ -90,13 +91,12 @@
       <details>
         <summary>HOW TO DRIVE</summary>
         <p>
-          <kbd>W ↑</kbd> Accelerate · <kbd>S ↓</kbd> Brake / reverse<br /><kbd
-            >A ←</kbd
+          <kbd>W ↑ 8</kbd> Accelerate · <kbd>S ↓ 2</kbd> Brake / reverse<br /><kbd
+            >A ← 4</kbd
           >
-          <kbd>D →</kbd> Steer · <kbd>SPACE</kbd> Drift ·
+          <kbd>D → 6</kbd> Steer · <kbd>SPACE / 0</kbd> Drift ·
           <kbd>R</kbd> Reset<br />Follow the arrows. Pass the glowing checkpoint
-          gates in order.<br />Opponents are ghost cars — clean racing, no
-          blocking.
+          gates in order.<br />Cars make contact. Leave room when overtaking.
         </p>
       </details>
     </footer>

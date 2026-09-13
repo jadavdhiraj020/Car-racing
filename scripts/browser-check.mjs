@@ -51,7 +51,8 @@ try {
   await b.locator("#join").click();
   await b.locator("#lobby").waitFor({ state: "visible" });
 
-  // Ensure driver A has rendered the joined driver before clicking start
+  // Activate host tab so Chromium unthrottles tab A
+  await a.bringToFront();
   await a.locator("#players .player").filter({ hasText: "Rahul" }).waitFor();
   await a.locator("#start").click();
 

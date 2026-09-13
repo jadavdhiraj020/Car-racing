@@ -11,6 +11,7 @@ export async function createGame({ dev = false } = {}) {
     io = new Server(http, { maxHttpBufferSize: 2048 }),
     rooms = new Map();
   app.get("/health", (_req, res) => res.json({ ok: true }));
+  app.get("/favicon.ico", (_req, res) => res.status(204).end());
   let vite;
   if (dev) {
     vite = await (
@@ -174,7 +175,7 @@ export async function createGame({ dev = false } = {}) {
         )
           r.phase = "results";
       }
-      if (ticks % 3 === 0) broadcast(r);
+      if (ticks % 2 === 0) broadcast(r);
     }
     ticks++;
   }, 1000 / 60);

@@ -543,3 +543,20 @@ footer,
 #hud {
   position: relative;
 }
+
+/* Broadcast-style race presentation. Labels remain outside the WebGL depth buffer. */
+.driver-label{position:fixed;left:0;top:0;z-index:2;pointer-events:none;padding:7px 13px;border-radius:6px;background:linear-gradient(120deg,#0b1529ef,#152d36e6);border:1px solid #ffffff35;border-left:3px solid var(--driver-color);color:#fff;font:600 11px 'DM Sans',sans-serif;letter-spacing:.4px;box-shadow:0 3px 14px #0005;white-space:nowrap;will-change:transform;max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.hud-top{backdrop-filter:blur(14px);background:linear-gradient(115deg,#091622ee,#102a2de0);border:1px solid #ffffff25;border-top:2px solid #d6fc71;box-shadow:0 14px 35px #0003}
+.speed{padding:18px 24px;border-radius:12px;background:linear-gradient(130deg,#071627dd,#153d3ac9);border:1px solid #ffffff26;min-width:160px;box-shadow:0 12px 40px #0004}
+.speed strong{font-variant-numeric:tabular-nums;font-size:76px;text-shadow:0 2px 12px #c9ff631a}
+.gear-badge{font-size:9px;letter-spacing:2px;color:#a5b5c6;display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.gear-badge b{font-size:25px;color:#d6fc71}
+.rev-meter{height:5px;background:#ffffff18;border-radius:8px;margin-bottom:14px;overflow:hidden}.rev-meter i{display:block;height:100%;width:calc(var(--rpm,20)*1%);background:linear-gradient(90deg,#d6fc71 60%,#ffcf57 80%,#ff554f);transition:width 80ms linear}
+#countdown{font-style:italic;font-size:160px;letter-spacing:-6px;filter:drop-shadow(0 12px 24px #071b22);text-shadow:3px 3px 0 #203b34}
+#countdown.pulse{animation:start-pulse .7s cubic-bezier(.1,.8,.2,1) both}
+@keyframes start-pulse{0%{transform:scale(1.7);opacity:0;filter:blur(8px)}25%{opacity:1;filter:blur(0)}100%{transform:scale(1)}}
+#results{border-top:3px solid #d6fc71;background:linear-gradient(145deg,#0b1b29fa,#173931fa)}#results .eyebrow:before{content:'★ ';font-size:24px}#results.celebrate{animation:podium .65s ease-out}#results .result-row:first-child{background:#d6fc7114;border-radius:7px;padding:17px 10px;color:#d6fc71;font-size:16px}
+@keyframes podium{from{opacity:0;margin-top:35px}to{opacity:1;margin-top:0}}
+.confetti{position:fixed;left:var(--x);top:-20px;z-index:6;width:7px;height:14px;background:hsl(var(--hue),85%,65%);pointer-events:none;animation:confetti-fall 3.5s var(--delay) ease-in forwards}
+@keyframes confetti-fall{to{transform:translate(45px,110vh) rotate(700deg);opacity:0}}
+@media(prefers-reduced-motion:reduce){.confetti{display:none}#countdown.pulse,#results.celebrate{animation:none}}
+@media(max-width:700px){.speed{padding:10px 15px;min-width:120px}.speed strong{font-size:50px}.driver-label{font-size:10px;max-width:140px}}
