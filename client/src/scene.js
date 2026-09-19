@@ -1407,7 +1407,7 @@ export function createScene(canvas, audioSystem = null) {
         targetPosX = left.x + (right.x - left.x) * tNorm;
         targetPosZ = left.z + (right.z - left.z) * tNorm;
       }
-      const targetPosY = left.y + (right.y - left.y) * tNorm;
+      let targetPosY = left.y + (right.y - left.y) * tNorm;
 
       // Linear angular interpolation preserves a constant turning rate across packets.
       const yawDiff = Math.atan2(
@@ -1446,7 +1446,8 @@ export function createScene(canvas, audioSystem = null) {
           Math.sin(right.yaw - left.yaw),
           Math.cos(right.yaw - left.yaw),
         );
-        targetYaw = left.yaw + yawDiff * tNorm;
+        const targetYaw = left.yaw + yawDiff * tNorm;
+        const sinceLatest = Math.max(0, Math.min(0.08, (renderAt - right.at) / 1000));
 
         if (sinceLatest > 0 && !(t.impact > 0.05)) {
           const ahead = {
