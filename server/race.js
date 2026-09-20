@@ -119,15 +119,38 @@ export class Race {
     return true;
   }
   step(dt, now, running, startAt) {
-    const safeDt = Math.min(0.05, Math.max(0.001, Number.isFinite(dt) ? dt : 1 / 60));
+    if (!Number.isFinite(dt) || dt <= 0 || !Number.isFinite(now)) return;
+    const safeDt = Math.min(1 / 30, dt);
+    dt = safeDt;
+    // Repair each invalid body BEFORE the broadphase/contact solver can spread NaNs.
     for (const c of this.cars.values()) {
-      const input =
+      if (
+        ![
+          c.b.position.x,
+          c.b.position.z,
+          c.yaw,
+          c.b.velocity.x,
+          c.b.velocity.z,
+        ].every(Number.isFinite) ||
+        Math.abs(c.b.position.x) > 10000 ||
+        Math.abs(c.b.position.z) > 10000
+      ) {
+        this.reset(c);
+        c.b.force.setZero();
+        c.b.torque.setZero();
+        c.b.aabbNeedsUpdate = true;
+      }
+    }
+    for (const c of this.cars.values()) {
+      let input =
         running && !c.finished && now - c.inputAt < 500 ? c.input : {};
       if (input.reset && now - c.resetAt > 2000) {
         this.reset(c);
+        input = {};
         c.resetAt = now;
       }
-      c.impact = (Number.isFinite(c.impact) ? c.impact : 0) * Math.exp(-12 * safeDt);
+      c.impact =
+        (Number.isFinite(c.impact) ? c.impact : 0) * Math.exp(-12 * safeDt);
       const motion = {
         x: c.b.position.x,
         z: c.b.position.z,
@@ -144,6 +167,7 @@ export class Race {
       c.b.position.y = 0.55;
       c.b.velocity.y = 0;
       c.ack = c.inputSeq || 0;
+      c.controls = input;
       c.b.quaternion.setFromEuler(0, c.yaw, 0);
       c.previous = { x: c.b.position.x, z: c.b.position.z };
     }
@@ -238,14 +262,19 @@ export class Race {
             c.b.velocity.z -= nz * bounce * Math.sign(offset);
 
             // Tangential friction along wall
-            const tx = -nz, tz = nx;
+            const tx = -nz,
+              tz = nx;
             const tangential = c.b.velocity.x * tx + c.b.velocity.z * tz;
             c.b.velocity.x -= tx * tangential * 0.15;
             c.b.velocity.z -= tz * tangential * 0.15;
 
             // Yaw deflection away from wall
-            const wallYaw = frame.yaw + (offset > 0 ? -Math.PI / 2 : Math.PI / 2);
-            const yawDiff = Math.atan2(Math.sin(wallYaw - c.yaw), Math.cos(wallYaw - c.yaw));
+            const wallYaw =
+              frame.yaw + (offset > 0 ? -Math.PI / 2 : Math.PI / 2);
+            const yawDiff = Math.atan2(
+              Math.sin(wallYaw - c.yaw),
+              Math.cos(wallYaw - c.yaw),
+            );
             c.yaw += yawDiff * 0.1 * impactVal;
           }
         }
@@ -304,7 +333,9 @@ export class Race {
       if (c.passed === 24 * TRACK.laps) {
         const denom = after - before;
         const frac =
-          Math.abs(denom) > 1e-4 ? Math.max(0, Math.min(1, -before / denom)) : 1;
+          Math.abs(denom) > 1e-4
+            ? Math.max(0, Math.min(1, -before / denom))
+            : 1;
         c.finished = Math.max(
           0.001,
           now - startAt - safeDt * 1000 * (1 - frac),
@@ -324,9 +355,9 @@ export class Race {
       vz: c.b.velocity.z,
       respawn: c.respawn,
       impact: c.impact,
-      throttle: c.input.up === true,
-      braking: c.input.down === true,
-      drift: c.input.drift === true,
+      throttle: (c.controls || {}).up === true,
+      braking: (c.controls || {}).down === true,
+      drift: (c.controls || {}).drift === true,
       speed: Math.hypot(c.b.velocity.x, c.b.velocity.z),
       steer: c.steer,
       passed: c.passed,

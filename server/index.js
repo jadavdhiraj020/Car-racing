@@ -29,6 +29,8 @@ export async function createGame({ dev = false } = {}) {
     "#ff9c45",
   ];
   const state = (r) => ({
+    seq: (r.stateSeq = (r.stateSeq || 0) + 1),
+    raceId: r.raceId || 0,
     code: r.code,
     host: r.host,
     phase: r.phase,
@@ -140,6 +142,7 @@ export async function createGame({ dev = false } = {}) {
       if (r.phase !== "lobby" || r.players.size < 2)
         throw Error("You need at least 2 players.");
       r.race = new Race();
+      r.raceId = (r.raceId || 0) + 1;
       [...r.players.keys()].forEach((id, i) => r.race.add(id, i));
       r.phase = "countdown";
       r.startAt = Date.now() + 3000;
@@ -201,7 +204,8 @@ export async function createGame({ dev = false } = {}) {
           r.race.step(1 / 60, now, r.phase === "racing", r.startAt);
         if (r.phase === "racing") {
           const cars = [...r.race.cars.values()];
-          if (cars.some((c) => c.finished !== null) && !r.endAt) r.endAt = now + 60000;
+          if (cars.some((c) => c.finished !== null) && !r.endAt)
+            r.endAt = now + 60000;
           if (
             (cars.length > 0 && cars.every((c) => c.finished !== null)) ||
             (r.endAt && now >= r.endAt) ||

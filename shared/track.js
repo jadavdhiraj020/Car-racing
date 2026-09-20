@@ -140,10 +140,21 @@ export function point(s, offset = 0) {
   };
 }
 
+// Exact spatial rejection: skip segment blocks whose bounds cannot beat the best hit.
+const blocks=[];
+for(let start=0;start<samples.length-1;start+=24){
+  const end=Math.min(samples.length-1,start+24);
+  let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+  for(let i=start;i<=end;i++){const p=samples[i];minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minZ=Math.min(minZ,p.z);maxZ=Math.max(maxZ,p.z);}
+  blocks.push({start,end,minX,maxX,minZ,maxZ});
+}
 export function nearest(x, z) {
   let best = Infinity,
     s = 0;
-  for (let i = 0; i < samples.length - 1; i++) {
+  for(const block of blocks){
+  const bx=Math.max(block.minX-x,0,x-block.maxX),bz=Math.max(block.minZ-z,0,z-block.maxZ);
+  if(bx*bx+bz*bz>best)continue;
+  for (let i = block.start; i < block.end; i++) {
     const a = samples[i],
       b = samples[i + 1],
       dx = b.x - a.x,
@@ -155,6 +166,7 @@ export function nearest(x, z) {
       best = distance;
       s = lengths[i] + t * (lengths[i + 1] - lengths[i]);
     }
+  }
   }
   return { s: s % LENGTH, distance: Math.sqrt(best) };
 }

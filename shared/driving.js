@@ -1,6 +1,9 @@
 import { TRACK, nearest } from "./track.js";
 // Shared kinematic controller: authoritative server and bounded client prediction.
 export function drive(c, input, dt, active = true) {
+  if (!Number.isFinite(dt) || dt <= 0) return;
+  dt = Math.min(dt, 1 / 30);
+  input = active ? input || {} : {};
   if (!Number.isFinite(c.yaw)) c.yaw = 0;
   if (!Number.isFinite(c.steer)) c.steer = 0;
   if (!Number.isFinite(c.vx)) c.vx = 0;
@@ -39,14 +42,17 @@ export function drive(c, input, dt, active = true) {
   const frontGrip = 1.0 + weightTransfer;
   const speedFactor = Math.min(Math.abs(speed) / 7.5, 1);
   const stability = 1 / (1 + Math.max(0, Math.abs(speed) - 16) / 54);
-  const turnAuthority = input.drift ? 2.22 : 1.5 * stability * frontGrip;
+  // Tire load increases with aerodynamic speed, while yaw authority stays bounded.
+  const lateralLimit = 14 + Math.min(18, speed * speed * 0.0072);
+  const turnAuthority = Math.min(1.5 * stability * frontGrip * (input.drift ? 1.25 : 1),
+    lateralLimit / Math.max(8, Math.abs(speed)) * (input.drift ? 1.15 : 1));
   const previousYaw = c.yaw;
   c.yaw += c.steer * Math.sign(speed || 1) * speedFactor * turnAuthority * dt;
 
   // Lateral tire grip / controlled drift slip
-  const slipDamping = input.drift ? 2.2 : 11.5;
+  const slipDamping = input.drift ? 3.2 : 11.5 + Math.abs(speed) * 0.1;
   const slip =
-    (lateral - (input.drift ? speed * Math.sin(c.yaw - previousYaw) : 0)) *
+    (lateral - speed * Math.sin(c.yaw - previousYaw)) *
     Math.exp(-slipDamping * dt);
 
   // Off-road grass friction (slight drag outside the asphalt road)
@@ -64,6 +70,14 @@ export function drive(c, input, dt, active = true) {
   c.vz = Number.isFinite(v.z) ? v.z : 0;
 }
 export function predict(c, input, dt) {
+  if (
+    !Number.isFinite(dt) ||
+    dt <= 0 ||
+    !Number.isFinite(c.x) ||
+    !Number.isFinite(c.z)
+  )
+    return;
+  dt = Math.min(dt, 1 / 30);
   drive(c, input, dt);
   if (Number.isFinite(c.vx) && Number.isFinite(c.vz)) {
     c.x += c.vx * dt;
