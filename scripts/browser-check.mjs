@@ -34,7 +34,7 @@ try {
   await a.goto(base);
   await a.locator("#connection").filter({ hasText: "ONLINE" }).waitFor();
   assert.equal(await a.locator("#quality").textContent(), "QUALITY MEDIUM");
-  for (const label of ["HIGH", "LOW", "MEDIUM"]) {
+  for (const label of ["HIGH", "ULTRA", "LOW", "MEDIUM"]) {
     await a.locator("#quality").click();
     assert.equal(await a.locator("#quality").textContent(), "QUALITY " + label);
   }

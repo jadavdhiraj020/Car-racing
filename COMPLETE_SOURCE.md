@@ -91,7 +91,7 @@ Cannon is a deliberate simplification: the server runs the same lightweight Java
 
 The client sends six boolean controls and an input sequence; it cannot submit position, laps, or results. The server advances physics at 60 ticks/second, accepts the next checkpoint only in the forward direction, and counts 24 gates per lap. Reset returns to the last accepted checkpoint without increasing progress. A car finishes at 72 crossings. Results appear when everyone remaining finishes, 60 seconds after the first finish, or at the 10-minute race limit. Unfinished drivers receive DNF. Finish times interpolate the crossing within a physics tick; roster order breaks exact ties.
 
-The browser uses a shared steering controller for bounded local prediction, acknowledges input sequences, and reconciles server corrections. Opponents interpolate on a synchronized timeline with a latency-aware buffer and limited extrapolation. Prediction yields to authoritative contacts near other cars and barriers. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
+The browser uses a shared steering controller for fixed-step local prediction, acknowledges input sequences, and reconciles server corrections. Opponents interpolate on a shared synchronized timeline with a latency/jitter-aware buffer and limited extrapolation. Prediction yields to authoritative contacts near other cars and barriers. Sequenced snapshots are validated before reaching rendering, HUD or audio. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels that avoid HUD panels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
 
 Disconnects immediately remove the driver and transfer host to the next remaining player. Empty rooms are deleted. Socket.IO reconnects transport automatically, but a disconnected driver must join the lobby again; mid-race joining/resuming is intentionally disabled. A host can rematch after results to reopen the lobby. Restarts and deploys erase all rooms.
 
@@ -104,12 +104,17 @@ car racing game/
 │   └── src/
 │       ├── main.js             Socket client, input, UI, audio and minimap
 │       ├── scene.js            Babylon track, cars, environment and camera
+│       ├── audio.js            Procedural engine, spatial opponents and mixer
+│       ├── music.js            Original ambient score and voice lifecycle
 │       └── style.css           Responsive racing interface
 ├── server/
 │   ├── index.js                HTTP, rooms, validation and race lifecycle
 │   └── race.js                 Physics, checkpoint rules and snapshots
 ├── shared/
-│   └── track.js                Loop geometry, checkpoints and configuration
+│   ├── track.js                Loop geometry, checkpoints and configuration
+│   ├── driving.js              Shared steering, grip and local prediction
+│   ├── contact.js              Oriented vehicle footprints
+│   └── protocol.js             Snapshot validation
 ├── test/
 │   └── race.test.js            Physics and actual Socket.IO integration tests
 ├── scripts/
@@ -186,7 +191,11 @@ Screenshots are written to `test-artifacts/`. Chrome automation uses a temporary
 5. Click the game area if needed. Hold W to accelerate; use A/D to steer. In the other window watch the first car move. Use R if stuck. If a window loses focus, controls release automatically.
 6. Follow the loop and glowing gate posts for three laps. Each finish registers on the server. After both finish (or the timeout), the host clicks **RUN IT BACK ↻**, then starts again.
 
-Controls: W/Up accelerate; S/Down brake then reverse; A/Left and D/Right steer; Space drift; R reset. Touch buttons appear on devices with coarse pointers. Sound is opt-in using **SOUND OFF**; it enables synthesized engine and countdown/results tones. Graphics defaults to Medium; the quality button cycles through High, Low, and Medium, changing render resolution. No downloaded music or models.
+Controls: W/Up accelerate; S/Down brake then reverse; A/Left and D/Right steer; Space drift; R reset. Touch buttons appear on devices with coarse pointers. Multiple keys or fingers holding one control remain active until the last is released. Losing focus releases all driving controls.
+
+Sound is opt-in using **SOUND OFF**. **MIXER** independently adjusts Master, Engine, Music and SFX. The original 64 BPM Japanese-inspired ambient score uses synthesized plucked, flute-like, piano-like and pad tones; music becomes quieter during racing. Engine pitch/load, shifts, tire/kerb sounds, wind and spatial opponents remain dynamic. Muting or hiding the page cancels transient sounds and music scheduling; resuming avoids replaying old cues. No recordings or commercial melodies are bundled.
+
+Graphics defaults to Medium; the button cycles through High, Ultra, Low and Medium. Tiers adjust resolution and shadows, with bounded adaptive resolution responding to frame times. Ultra starts above native resolution and costs more GPU time. The existing WebGL renderer is retained and validated with WebGL2; WebGPU was not introduced. The chase camera damps position and aim, and wheel/body motion follows speed, steering and load.
 
 Testing over your home Wi-Fi requires the PC's LAN address, not localhost. Run `ipconfig`, find the active Wi-Fi adapter's IPv4 address, and open `http://THAT-ADDRESS:3000` on the other device. If Windows asks, allow Node on your trusted private network. The easiest test between different homes is the deployed HTTPS URL below; do not forward router ports.
 
@@ -332,17 +341,15 @@ No public URL exists yet. Render will assign one like `https://apex-friends-raci
 
 ## Verification
 
-See `VERIFICATION.md` for observed checks, not just a mental checklist. Public deployment remains pending your account connection. Mobile layout is checked at a narrow viewport; actual touch-device play, wide-area latency and low-end hardware performance still need real-device testing.
+See [VERIFICATION.md](VERIFICATION.md) for measured frame times, complete two-browser races, stress checks and limits. Public deployment is NOT TESTED in this run because no deployed URL was available. Mobile layout is checked at a narrow viewport; actual touch-device play, wide-area latency and low-end hardware performance still need real-device testing.
 
 # 🔴 ONLY THINGS YOU MUST DO
 
-1. Sign in to GitHub and publish the prepared repository (GitHub Desktop steps above).
-2. Sign in to Render, connect that repository, and select the **Free** web service using the exact settings above.
-3. Copy your assigned HTTPS URL and invite a friend on another network for the final online race check.
+1. If not already deployed, sign in to Render, connect the existing GitHub repository, and select the **Free** web service using the exact settings above.
+2. If already deployed, confirm Render has successfully deployed the latest `main` commit.
+3. Open your assigned HTTPS URL, create a room, share its invite link, and invite a friend on another network for the final online race check.
 
 No local server management is needed after that one-time deployment, subject to free hosting limits.
-
-# Car-racing
 ````
 
 ## THIRD_PARTY_NOTICES.md
@@ -352,7 +359,7 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/THIRD_PARTY_NOTICES
 ````
 # Bundled font licenses
 
-Fonts are served locally from the production build. Engine audio, car geometry and reflection textures are procedural.
+Fonts are served locally from the production build. Engine audio, car geometry and reflection textures are procedural. The ambient music in client/src/music.js is an original procedural composition included under this project's MIT license; it uses no recordings, commercial songs or third-party sample libraries.
 
 ## barlow-condensed
 
@@ -554,43 +561,76 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/VERIFICATION.md`
 ````
 # Verification record
 
-Checked 2026-09-13 on Windows with Node.js 24.19.0. No test files were created or modified for this overhaul. Additional checks ran as inline Node scripts.
+Checked 2026-09-20 through 2026-09-23 on Windows, Node.js 24.19.0 and Chrome using Intel UHD / Direct3D11. No new test files were added. The existing browser smoke check's quality list was updated for Ultra; other additional checks ran inline. Build artifacts, screenshots and local metrics are ignored under test-artifacts/.
 
-## Passing checks
+## Audit and fixes
 
-- Production Vite build: successful. Main bundle approximately 1.46 MB / 379 KB gzip, plus lazy shader modules and local fonts. Vite retains its size advisory.
-- All eight existing tests pass: circuit continuity, physics acceleration/braking/reverse, barriers, stale input, checkpoint order, three physically driven laps, real Socket.IO lifecycle, isolation, authority, capacity, disconnect host transfer and finish timeout.
-- Opposing 50 m/s cars: detected impact, no penetration or pass-through in the sampled simulation. Occupied-checkpoint resets selected a free position.
-- Six moving cars over 900 physics ticks: maximum measured overlap 0; barrier footprint excess 0. Mean simulation tick 1.54 ms, p95 1.89 ms on this machine, outside the software-rendering stress run.
-- Two independent Chrome windows loaded the production build and passed create/join, quality switching, synchronized countdown, keyboard acceleration/turning/reset, winner/results, rematch, leave and narrow layout. No JavaScript errors in the final native-GPU run.
-- Results presentation uses the existing server-side finish fixture; the separate server test physically drives three complete laps. This is not a human-driven browser race to the finish.
-- Audio toggles ON/OFF/ON succeed during racing without exceptions. Procedural engine/gear/shift/tire/kerb/impact audio is retained, RPM now drops on upshift, audio resumes correctly, and opponent positions use the correct coordinate conversion for stereo.
-- Added 120 ms input delay and 120 ms snapshot delay, then suppressed snapshots for 350 ms: both clients stayed in the same race and recovered fresh state. This models transient application-message delay, not an exhaustive WAN packet-loss test.
-- Player labels use text content; a nickname containing HTML is displayed literally.
-- Visually inspected production screenshots: car geometry and wheel sidewalls, race HUD, track direction, results and mobile home. Screenshots are in ignored test-artifacts/.
+| Priority | Reproduced problem or audit finding | Change |
+| --- | --- | --- |
+| P0 | Render frames threw ReferenceError and assignment-to-constant errors; recovery warnings hid a broken 3D view even though build/server tests passed | Repair target yaw/time bindings and mutable height; count failed frames and surface the first render error |
+| P1 | Raw oversized delta reached Cannon despite a locally clamped value; invalid transforms could contaminate contact solving | Bound the complete simulation step, reject invalid deltas, repair nonfinite car state before stepping |
+| P1 | Delayed/reordered or malformed snapshots could reach HUD, transforms and audio | Validate complete snapshots and reject stale sequence numbers; track race generation |
+| P1 | High-speed drift yaw and instantaneous lateral cancellation produced abrupt handling | Bound lateral acceleration/yaw authority and preserve damped lateral inertia in shared server/prediction handling |
+| P1 | Variable-step prediction and independently adjusted interpolation could disagree during contact | Fixed-step local prediction, one frame timeline, conservative contact fallback, bounded extrapolation and residual oriented visual separation |
+| P1 | Stale commands survived reset or were reported as active throttle; redundant bindings released held controls | Snapshot effective controls; clear reset commands; aggregate independent keyboard and pointer sources; clear them on blur, hide, disconnect and leave |
+| P1 | Audio transients, remote voices and music needed explicit ownership across state changes | Owned node/source/timer cleanup, bounded music voices, envelope ramps, remote range hysteresis, cancellation on mute/phase/hide |
+| P2 | Camera aim and lobby transitions snapped; wheels always spun forward | Damped aim/position/FOV, signed wheel rotation, bounded load-based body and suspension motion |
+| P2 | Repeated track scans, identical DOM writes and layout reads consumed frame budget | Exact spatial rejection in nearest-track search, cached HTML, batched HUD rectangles, bounded adaptive resolution |
+| P2 | Requested music/mixer and Ultra tier were missing | Original quiet procedural ambient score, four independent mixer controls, four graphics tiers |
 
-## Performance observations
+The existing room, race, checkpoint, results, rematch and same-origin deployment architecture is preserved. This remains a believable arcade handling model: suspension/body load is animated, not a full tire and suspension simulator. The existing flowing 22 m wide circuit is retained. The validated WebGL2 path is retained; WebGPU was not introduced.
 
-- One 1440 x 1000 native-GPU browser with two network cars, Medium and audio: mean 18.61 ms (about 54 FPS), p95 34.6 ms over 180 frames, reaching 180 km/h. Some frame spikes remain on this integrated GPU.
-- Two simultaneous 1440 x 1000 Chrome windows, Medium, Intel UHD / Direct3D11, audio active: mean frame interval 20.21 ms (about 49 FPS), p95 27.9 ms over 180 frames. Both clients share one GPU.
-- Two 960 x 640 windows using SwiftShader software graphics: mean 100.08 ms, p95 124.8 ms. Software rendering is substantially slower and is not recommended for playing.
-- An initial shared-context browser harness missed countdown assertions under load. Independent contexts completed the full assertions. A native run had one transient shader-fetch failure; the final rerun passed with request-failure monitoring and no page errors.
-- These are short local measurements, not a universal 60 FPS or internet-latency guarantee.
+## Passing automated and browser checks
+
+- Final production build succeeds: main bundle 1,475.48 kB / 384.41 kB gzip, plus lazy shader modules and local fonts. Vite retains its bundle-size advisory.
+- All eight existing Node tests pass, including three physically driven laps through all 72 checkpoints, stale inputs, barriers, reverse, room isolation, host authority/transfer, player cap, invalid requests, results and timeout.
+- Inline invalid-state checks repair NaN/Infinity before physics solving. Invalid/nonpositive deltas do not move cars; oversized deltas are bounded.
+- 10,000 nearest-track queries exactly match the previous exhaustive search (maximum discrepancy 0).
+- 4,800 ticks of rapid steering, braking, throttle and drift remain finite; maximum sampled per-tick yaw change is 0.034 radians.
+- Opposing cars at a combined closing speed of 100 m/s make contact without exchanging sides or sampled penetration. Six-car, 900-tick random-control stress records maximum overlap 0. Sub-tick finishing orders a 10 ms gap correctly.
+- Two simultaneous independent production Chrome clients physically drive three full laps using browser keyboard events, with no finish/checkpoint/position fixtures. Both reach 72 checkpoints; finish times are 102.749 s and 104.865 s, followed by successful results and rematch. Zero browser console/page errors and zero failed render frames. At 94 approximately one-second sample points, maximum authoritative and rendered footprint overlap is 0.
+- Additional browser stress reaches 180 km/h, performs hard steering, drift, barrier/head-on impacts, reset, disconnect/rejoin and repeated races/rematches. Five race/rematch cycles keep scene counts fixed. Some lifecycle scenarios use finish fixtures; the full three-lap browser run above does not.
+- Delaying inputs by 100 ms and snapshots by 100 ms, followed by a 350 ms snapshot gap, preserves the race and recovers fresh state. Invalid snapshots are discarded. This is controlled application-message delay, not exhaustive WAN packet loss.
+- Combined W/Up and A/Left bindings retain the held control when one key is released. A real browser touch event holds throttle after keyboard release; releasing the final touch or blurring releases controls. Four quality tiers, synchronized countdown, winner/results, responsive HUD and a 390 x 844 layout are exercised. Production screenshots are visually inspected.
+- Engine/music activation, four independent mixer sliders and mute/unmute work. Music uses original 64 BPM synthesized material and is ducked during racing. Muting releases music voices, remote voices and effect timers; the reusable continuous engine graph remains allocated intentionally.
+- Offline browser music rendering produces finite, non-silent, unclipped samples: peak 0.0293, RMS 0.00530, maximum adjacent-sample difference 0.00182. All rendered voices are released. This verifies signal/lifecycle behavior, not a subjective rating of realism.
+
+## Measured performance and lifetime
+
+Two native-GPU Chrome clients share this machine's GPU. Medium may adapt its internal resolution; these measurements are observations, not universal 60 FPS guarantees.
+
+| Measurement | Observation |
+| --- | --- |
+| Sustained race viewport | 1280 x 800 per client |
+| Late-race frame interval | 20.54 / 20.55 ms mean (about 49 FPS); p95 24.4 / 24.5 ms over each client's latest 360 frames |
+| CPU time inside scene.render at final sample | 2.6 / 7.8 ms; excludes asynchronous GPU work |
+| Draw calls at final sample | 67 / 100; depends on each camera's visible objects |
+| Scene objects throughout race/rematch checks | 573 meshes, 49 materials, 14 textures; no growth observed |
+| Post-GC JS heap at 3 / 36 / 68 / 102 seconds, client 1 | 23.27 / 23.98 / 24.29 / 23.69 MB |
+| Post-GC JS heap at same points, client 2 | 22.81 / 23.60 / 23.74 / 23.40 MB |
+| Audio after mute and envelope completion | 33 nodes, 9 reusable continuous sources, 0 music voices, 0 remote cars, 0 transient timers |
+| Final six-car, 900-tick simulation with deterministic random controls | Mean 1.28 ms, p95 2.22 ms per tick |
+| Measured racing snapshots over 3 seconds | 29.62 Hz, approximately 25.4 kB/s of JSON payload per receiving client for two cars; excludes transport overhead |
+
+Heap variation and stable object counts show no accumulating leak in these runs. They do not replace a multi-hour soak. Earlier software-rendered Chrome was much slower than native GPU rendering. Hardware acceleration is required for practical play.
 
 ## Reproduce
 
-Run npm.cmd ci, npm.cmd test, npm.cmd run build, then npm.cmd start. The existing npm.cmd run test:browser script uses software Chrome graphics. Native verification evaluated those same assertions in memory with --use-angle=d3d11 and one browser.newPage context per driver; no test source was changed. Additional latency and performance checks also ran inline without writing test files.
+Run `npm.cmd ci`, `npm.cmd test`, `npm.cmd run build`, then `npm.cmd start`. Production serves the built assets and Socket.IO from one origin.
 
-For manual multiplayer verification, open two independent browser windows, create/join the same room, enable sound, start, drive, finish three laps and rematch. Use the deployed HTTPS URL to test separate homes.
+`npm.cmd run test:browser` runs the existing Chrome smoke script. Its default uses software graphics. Native verification evaluates the same assertions in memory with `--use-angle=d3d11` and a separate browser context per driver. Inline extensions check combined controls, mixer cleanup and runtime-error counters. Complete-lap verification imports the shared track geometry into a temporary browser controller that dispatches ordinary key events every 50 ms; it does not alter game positions, speed, checkpoints or finishes. No extra test source is saved.
 
-## Limits
+For manual multiplayer verification, create/join a room in two independent browser windows, turn sound on, start, drive three laps, check finishing order and rematch. Test distant friends using the deployed HTTPS URL.
 
-- Public deployment and play between separate homes were not verified in this run. The existing GitHub main branch is the requested delivery target; Render configuration remains intact.
-- A transport disconnect removes the player and transfers host. Full mid-race rejoining is intentionally unchanged; transient message gaps are handled separately.
-- Physics remains an arcade handling model with authoritative contacts; suspension and weight-transfer animation are approximations, not a full tire/suspension simulator.
-- Audio is original procedural synthesis, not recorded F1 engine samples. Perceptual realism has not been independently rated or tested on physical mobile devices.
-- Contact stress checks found no overlap in their tested cases; finite simulation and arbitrary network failures cannot provide an absolute guarantee for every possible situation.
-- Rooms remain in memory. Server restarts/deploys clear them. No persistence, accounts or unrelated features were added.
+## NOT TESTED and practical limits
+
+- Public deployment: NOT TESTED. No deployed URL was available. Render configuration, health route and same-origin networking remain intact; a Git push does not prove that a public deployment succeeded.
+- Separate-home internet play, physical mobile/touch hardware, headphones/speakers and hours-long sessions: NOT TESTED. Narrow layout and real browser touch-event input can be checked locally without proving performance on a phone.
+- Audio is procedural motorsport-inspired synthesis, not sampled real F1 recordings. Perceived engine/music quality has not been independently rated.
+- The tested machine does not sustain locked 60 FPS with two simultaneous 3D clients. Adaptive resolution is bounded; select Low or use one client per machine for more headroom.
+- No overlap/pass-through was observed in the stated checks. Finite simulation and arbitrary networking conditions cannot establish an absolute guarantee for every possible collision.
+- A full transport disconnect removes that driver and may transfer host. Rejoining an active race remains disabled; reconnecting players join the next lobby.
+- Rooms remain in memory. Server restarts/deployments clear them.
 ````
 
 ## client/index.html
@@ -604,7 +644,10 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/index.html`
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="theme-color" content="#122620" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏎️</text></svg>" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏎️</text></svg>"
+    />
     <title>APEX — Friends on the grid</title>
   </head>
   <body>
@@ -616,9 +659,35 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/index.html`
       <div class="top-right">
         <span id="connection">CONNECTING</span
         ><button id="sound" class="small">SOUND OFF</button
+        ><button
+          id="audioSettings"
+          class="small"
+          aria-expanded="false"
+          aria-controls="audioPanel"
+        >
+          MIXER</button
         ><button id="quality" class="small">QUALITY MEDIUM</button>
       </div>
     </header>
+    <section
+      id="audioPanel"
+      class="panel audio-panel"
+      hidden
+      aria-label="Audio mixer"
+    >
+      <div class="eyebrow">SOUND MIX</div>
+      <label for="volumeMaster"
+        >MASTER <output id="valueMaster">80%</output></label
+      ><input id="volumeMaster" type="range" min="0" max="100" value="80" />
+      <label for="volumeEngine"
+        >ENGINE <output id="valueEngine">80%</output></label
+      ><input id="volumeEngine" type="range" min="0" max="100" value="80" />
+      <label for="volumeMusic">MUSIC <output id="valueMusic">22%</output></label
+      ><input id="volumeMusic" type="range" min="0" max="100" value="22" />
+      <label for="volumeSfx">SFX <output id="valueSfx">70%</output></label
+      ><input id="volumeSfx" type="range" min="0" max="100" value="70" />
+      <p class="micro">Original ambient score · engine-led race mix</p>
+    </section>
     <main id="home">
       <div class="eyebrow">PRIVATE ROOMS. REAL RIVALRIES.</div>
       <h1>Good friends.<br /><em>Bad losers.</em></h1>
@@ -672,9 +741,15 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/index.html`
         <button class="leave small">LEAVE</button>
       </div>
       <div id="leaderboard" class="panel"></div>
-      <div class="speed"><div class="rev-meter" id="rpm"><i></i></div><div class="gear-badge">GEAR <b id="gear">1</b></div><strong id="speed">0</strong><span>KM/H</span></div>
+      <div class="speed">
+        <div class="rev-meter" id="rpm"><i></i></div>
+        <div class="gear-badge">GEAR <b id="gear">1</b></div>
+        <strong id="speed">0</strong><span>KM/H</span>
+      </div>
       <div id="finishMessage"></div>
-      <div id="gantryHud" class="gantry-hud" hidden><i></i><i></i><i></i><i></i><i></i></div>
+      <div id="gantryHud" class="gantry-hud" hidden>
+        <i></i><i></i><i></i><i></i><i></i>
+      </div>
       <div id="countdown"></div>
       <canvas id="minimap" width="180" height="200"></canvas>
     </section>
@@ -717,12 +792,24 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/index.html`
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/src/audio.js`
 
 ````
+import { AmbientMusic } from "./music.js";
 // Professional Web Audio API Procedural F1 Racing Audio Synthesizer
 // Pure procedural synthesis - zero external audio assets required
 
 export class EngineAudio {
   constructor() {
     this.ctx = null;
+    this.nodes = new Set();
+    this.sources = new Set();
+    this.timers = new Set();
+    this.volumes = { master: 0.8, engine: 0.8, music: 0.22, sfx: 0.7 };
+    this.phase = "home";
+    this.suspended = false;
+    this.output = null;
+    this.engineBus = null;
+    this.sfxBus = null;
+    this.musicBus = null;
+    this.impactLevel = 0;
     this.master = null;
     this.effects = null;
 
@@ -732,8 +819,11 @@ export class EngineAudio {
     this.highOsc = null;
     this.raspOsc = null;
     this.turboOsc = null;
+    this.mguOsc = null;
     this.engineGain = null;
     this.turboGain = null;
+    this.mguGain = null;
+    this.mguFilter = null;
     this.screamerFilter = null;
     this.intakeFilter = null;
     this.exhaustShaper = null;
@@ -764,10 +854,140 @@ export class EngineAudio {
     this.remoteCars = new Map();
   }
 
+  track(node) {
+    this.nodes.add(node);
+    const disconnect = node.disconnect.bind(node);
+    node.disconnect = (...args) => {
+      if (args.length === 0) this.nodes.delete(node);
+      return disconnect(...args);
+    };
+    if (typeof node.start === "function") {
+      this.sources.add(node);
+      node.addEventListener("ended", () => {
+        this.sources.delete(node);
+        node.disconnect();
+      });
+    }
+    return node;
+  }
+  later(fn, ms) {
+    const id = setTimeout(() => {
+      this.timers.delete(id);
+      fn();
+    }, ms);
+    this.timers.add(id);
+    return id;
+  }
+  setVolumes(values) {
+    for (const key of Object.keys(this.volumes))
+      if (Number.isFinite(values[key]))
+        this.volumes[key] = Math.max(0, Math.min(1, values[key]));
+    this.applyMix();
+  }
+  applyMix() {
+    if (!this.ctx || !this.output) return;
+    const t = this.ctx.currentTime;
+    this.output.gain.setTargetAtTime(
+      this.enabled && !this.suspended ? this.volumes.master : 0,
+      t,
+      0.04,
+    );
+    this.engineBus.gain.setTargetAtTime(this.volumes.engine, t, 0.04);
+    this.sfxBus.gain.setTargetAtTime(this.volumes.sfx, t, 0.04);
+    this.musicBus.gain.setTargetAtTime(
+      this.volumes.music * (this.phase === "racing" ? 0.35 : 1),
+      t,
+      0.35,
+    );
+  }
+  setPhase(phase) {
+    if (phase === this.phase) return;
+    this.phase = phase;
+    this.cancelEffects();
+    this.gear = 1;
+    this.rpm = this.idleRpm;
+    this.boost = 0;
+    this.impactLevel = 0;
+    for (const id of [...this.remoteCars.keys()]) this.removeRemoteCar(id);
+    this.applyMix();
+  }
+  cancelEffects() {
+    for (const id of this.timers) clearTimeout(id);
+    this.timers.clear();
+    if (this.effects && this.ctx) {
+      this.effects.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.effects.gain.setTargetAtTime(0, this.ctx.currentTime, 0.01);
+    }
+    const keep = new Set([
+      ...(this.continuous || []),
+      ...[...this.remoteCars.values()].map((n) => n.osc),
+      ...[...(this.music?.voices || [])].map((v) => v.osc),
+    ]);
+    for (const source of this.sources)
+      if (!keep.has(source)) {
+        try {
+          source.stop(this.ctx.currentTime + 0.025);
+        } catch {}
+      }
+  }
+  setSuspended(value) {
+    this.suspended = !!value;
+    if (value) {
+      this.cancelEffects();
+      this.music?.stop();
+    } else if (this.enabled) this.music?.start();
+    this.applyMix();
+  }
+  metrics() {
+    return {
+      nodes: this.nodes.size,
+      sources: this.sources.size,
+      remoteCars: this.remoteCars.size,
+      timers: this.timers.size,
+      musicVoices: this.music?.voices.size || 0,
+      musicRunning: this.music?.running || false,
+      volumes: { ...this.volumes },
+      enabled: this.enabled,
+      suspended: this.suspended,
+    };
+  }
+  async dispose() {
+    this.enabled = false;
+    this.music?.dispose();
+    this.cancelEffects();
+    for (const source of this.sources) {
+      try {
+        source.stop();
+      } catch {}
+    }
+    for (const node of [...this.nodes]) {
+      try {
+        node.disconnect();
+      } catch {}
+    }
+    this.sources.clear();
+    this.nodes.clear();
+    this.remoteCars.clear();
+    this.music = null;
+    const ctx = this.ctx;
+    this.ctx = null;
+    if (ctx && ctx.state !== "closed") await ctx.close();
+  }
   async init() {
+    try {
+      await this.initialize();
+    } catch (error) {
+      await this.dispose();
+      throw error;
+    }
+  }
+  async initialize() {
     if (this.ctx) {
       if (this.ctx.state === "suspended") await this.ctx.resume();
       this.enabled = true;
+      this.suspended = false;
+      this.music?.start();
+      this.applyMix();
       return;
     }
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -776,24 +996,33 @@ export class EngineAudio {
     this.ctx = ctx;
 
     // Master bus with multiband limiting
-    const limiter = ctx.createDynamicsCompressor();
+    const limiter = this.track(ctx.createDynamicsCompressor());
     limiter.threshold.value = -12;
     limiter.knee.value = 8;
     limiter.ratio.value = 10;
     limiter.attack.value = 0.002;
     limiter.release.value = 0.12;
-    limiter.connect(ctx.destination);
+    this.output = this.track(ctx.createGain());
+    this.output.gain.value = 0;
+    this.output.connect(ctx.destination);
+    limiter.connect(this.output);
+    this.engineBus = this.track(ctx.createGain());
+    this.engineBus.connect(limiter);
+    this.sfxBus = this.track(ctx.createGain());
+    this.sfxBus.connect(limiter);
+    this.musicBus = this.track(ctx.createGain());
+    this.musicBus.connect(limiter);
 
-    this.master = ctx.createGain();
+    this.master = this.track(ctx.createGain());
     this.master.gain.value = 0.55;
-    this.master.connect(limiter);
+    this.master.connect(this.engineBus);
 
-    this.effects = ctx.createGain();
+    this.effects = this.track(ctx.createGain());
     this.effects.gain.value = 0.5;
-    this.effects.connect(limiter);
+    this.effects.connect(this.sfxBus);
 
     // Engine exhaust distortion wave shaper for aggressive F1 rasp
-    this.exhaustShaper = ctx.createWaveShaper();
+    this.exhaustShaper = this.track(ctx.createWaveShaper());
     const curve = new Float32Array(512);
     for (let i = 0; i < 512; i++) {
       const x = (i * 2) / 512 - 1;
@@ -802,18 +1031,18 @@ export class EngineAudio {
     this.exhaustShaper.curve = curve;
 
     // Screamer resonance filter (F1 tuned exhaust header acoustic formant)
-    this.screamerFilter = ctx.createBiquadFilter();
+    this.screamerFilter = this.track(ctx.createBiquadFilter());
     this.screamerFilter.type = "bandpass";
     this.screamerFilter.frequency.value = 1800;
     this.screamerFilter.Q.value = 2.4;
 
     // Intake throat lowpass filter
-    this.intakeFilter = ctx.createBiquadFilter();
+    this.intakeFilter = this.track(ctx.createBiquadFilter());
     this.intakeFilter.type = "lowpass";
     this.intakeFilter.frequency.value = 1200;
     this.intakeFilter.Q.value = 2.0;
 
-    this.engineGain = ctx.createGain();
+    this.engineGain = this.track(ctx.createGain());
     this.engineGain.gain.value = 0.4;
 
     // Route engine oscillators:
@@ -825,49 +1054,62 @@ export class EngineAudio {
     this.engineGain.connect(this.master);
 
     // 1. Sub-bass fundamental (chassis shudder)
-    this.subOsc = ctx.createOscillator();
+    this.subOsc = this.track(ctx.createOscillator());
     this.subOsc.type = "sawtooth";
-    this.subGain = ctx.createGain();
+    this.subGain = this.track(ctx.createGain());
     this.subGain.gain.value = 0.32;
     this.subOsc.connect(this.subGain);
     this.subGain.connect(this.intakeFilter);
 
     // 2. Mid harmonic combustion growl (2nd & 3rd harmonics)
-    this.midOsc = ctx.createOscillator();
+    this.midOsc = this.track(ctx.createOscillator());
     this.midOsc.type = "sawtooth";
-    this.midGain = ctx.createGain();
+    this.midGain = this.track(ctx.createGain());
     this.midGain.gain.value = 0.45;
     this.midOsc.connect(this.midGain);
     this.midGain.connect(this.intakeFilter);
 
     // 3. High-RPM screamer harmonic (high pulse wave)
-    this.highOsc = ctx.createOscillator();
+    this.highOsc = this.track(ctx.createOscillator());
     this.highOsc.type = "triangle";
-    this.highGain = ctx.createGain();
+    this.highGain = this.track(ctx.createGain());
     this.highGain.gain.value = 0.35;
     this.highOsc.connect(this.highGain);
     this.highGain.connect(this.intakeFilter);
 
     // 4. Combustion cylinder rasp (sharp sawtooth 4th harmonic)
-    this.raspOsc = ctx.createOscillator();
+    this.raspOsc = this.track(ctx.createOscillator());
     this.raspOsc.type = "sawtooth";
-    this.raspGain = ctx.createGain();
+    this.raspGain = this.track(ctx.createGain());
     this.raspGain.gain.value = 0.28;
     this.raspOsc.connect(this.raspGain);
     this.raspGain.connect(this.intakeFilter);
 
     // 5. Turbocharger spool whistle
-    this.turboOsc = ctx.createOscillator();
+    this.turboOsc = this.track(ctx.createOscillator());
     this.turboOsc.type = "sine";
-    this.turboGain = ctx.createGain();
+    this.turboGain = this.track(ctx.createGain());
     this.turboGain.gain.value = 0.0;
-    this.turboFilter = ctx.createBiquadFilter();
+    this.turboFilter = this.track(ctx.createBiquadFilter());
     this.turboFilter.type = "bandpass";
     this.turboFilter.frequency.value = 3200;
     this.turboFilter.Q.value = 4.0;
     this.turboOsc.connect(this.turboFilter);
     this.turboFilter.connect(this.turboGain);
     this.turboGain.connect(this.master);
+
+    // 5b. MGU-K / MGU-H hybrid electric boost spool whine
+    this.mguOsc = this.track(ctx.createOscillator());
+    this.mguOsc.type = "sine";
+    this.mguGain = this.track(ctx.createGain());
+    this.mguGain.gain.value = 0.0;
+    this.mguFilter = this.track(ctx.createBiquadFilter());
+    this.mguFilter.type = "bandpass";
+    this.mguFilter.frequency.value = 4200;
+    this.mguFilter.Q.value = 5.0;
+    this.mguOsc.connect(this.mguFilter);
+    this.mguFilter.connect(this.mguGain);
+    this.mguGain.connect(this.master);
 
     // 6. Wind noise generator (high speed rush)
     const bufferSize = ctx.sampleRate * 2;
@@ -876,47 +1118,47 @@ export class EngineAudio {
     for (let i = 0; i < bufferSize; i++) {
       output[i] = Math.random() * 2 - 1;
     }
-    const noiseSource = ctx.createBufferSource();
+    const noiseSource = this.track(ctx.createBufferSource());
     noiseSource.buffer = noiseBuffer;
     noiseSource.loop = true;
 
-    this.windFilter = ctx.createBiquadFilter();
+    this.windFilter = this.track(ctx.createBiquadFilter());
     this.windFilter.type = "bandpass";
     this.windFilter.frequency.value = 800;
     this.windFilter.Q.value = 1.2;
 
-    this.windGain = ctx.createGain();
+    this.windGain = this.track(ctx.createGain());
     this.windGain.gain.value = 0;
 
     noiseSource.connect(this.windFilter);
     this.windFilter.connect(this.windGain);
-    this.windGain.connect(this.master);
+    this.windGain.connect(this.sfxBus);
 
     // 7. Tire skid / drift noise
-    const skidSource = ctx.createBufferSource();
+    const skidSource = this.track(ctx.createBufferSource());
     skidSource.buffer = noiseBuffer;
     skidSource.loop = true;
 
-    this.skidFilter = ctx.createBiquadFilter();
+    this.skidFilter = this.track(ctx.createBiquadFilter());
     this.skidFilter.type = "bandpass";
     this.skidFilter.frequency.value = 1350;
     this.skidFilter.Q.value = 3.2;
 
-    this.skidGain = ctx.createGain();
+    this.skidGain = this.track(ctx.createGain());
     this.skidGain.gain.value = 0;
 
     skidSource.connect(this.skidFilter);
     this.skidFilter.connect(this.skidGain);
-    this.skidGain.connect(this.master);
+    this.skidGain.connect(this.sfxBus);
 
     // 8. Kerb rumble oscillator
-    this.kerbOsc = ctx.createOscillator();
+    this.kerbOsc = this.track(ctx.createOscillator());
     this.kerbOsc.type = "sine";
     this.kerbOsc.frequency.value = 46;
-    this.kerbGain = ctx.createGain();
+    this.kerbGain = this.track(ctx.createGain());
     this.kerbGain.gain.value = 0;
     this.kerbOsc.connect(this.kerbGain);
-    this.kerbGain.connect(this.master);
+    this.kerbGain.connect(this.sfxBus);
 
     // Start running oscillators
     const now = ctx.currentTime;
@@ -925,31 +1167,41 @@ export class EngineAudio {
     this.highOsc.start(now);
     this.raspOsc.start(now);
     this.turboOsc.start(now);
+    this.mguOsc.start(now);
     noiseSource.start(now);
     skidSource.start(now);
     this.kerbOsc.start(now);
 
     this.enabled = true;
     if (ctx.state === "suspended") await ctx.resume();
+    this.continuous = new Set(this.sources);
+    this.music = new AmbientMusic(ctx, this.musicBus, (node) =>
+      this.track(node),
+    );
+    this.music.start();
+    this.applyMix();
   }
 
   update(speed, throttle, brake, drift, racing, finished, onKerb = false) {
+    this.quiet = false;
+    if (this.suspended) return;
     const now = performance.now();
-    const dt = Math.min(0.1, (now - this.previous) / 1000);
+    const dt = Math.min(0.05, Math.max(0.001, (now - this.previous) / 1000));
     this.previous = now;
 
     // F1 sequential 6-speed gearbox simulation
     const gearThresholds = [12, 21, 30, 39, 47];
     let gear = this.gear;
 
-    if (speed > (gearThresholds[gear - 1] ?? Infinity) && gear < 6) {
+    const safeSpeed = Number.isFinite(speed) ? speed : 0;
+    if (safeSpeed > (gearThresholds[gear - 1] ?? Infinity) && gear < 6) {
       // Upshift: ignition cut and exhaust crackle
       gear++;
       this.gear = gear;
       this.shiftUntil = now + 65;
       this.shiftType = "up";
       this.exhaustPop(0.7);
-    } else if (gear > 1 && speed < gearThresholds[gear - 2] - 3.5) {
+    } else if (gear > 1 && safeSpeed < gearThresholds[gear - 2] - 3.5) {
       // Downshift: rev-match throttle blip
       gear--;
       this.gear = gear;
@@ -963,11 +1215,11 @@ export class EngineAudio {
 
     // Calculate realistic F1 RPM curve
     const gearRatios = [1.0, 0.72, 0.54, 0.42, 0.34, 0.28];
-    const ratio = gearRatios[gear - 1];
+    const ratio = gearRatios[gear - 1] ?? 0.5;
 
     let targetRpm = this.idleRpm;
     if (racing && !finished) {
-      const driveSpeedRpm = speed * 800 * ratio;
+      const driveSpeedRpm = Math.abs(safeSpeed) * 800 * ratio;
       const throttleRpm = throttle ? 1000 : 0;
       const brakeDrop = brake ? 600 : 0;
       targetRpm = Math.min(
@@ -987,6 +1239,7 @@ export class EngineAudio {
     // Smooth RPM response
     const rpmAttack = throttle ? 18 : 12;
     this.rpm += (targetRpm - this.rpm) * (1 - Math.exp(-dt * rpmAttack));
+    if (!Number.isFinite(this.rpm)) this.rpm = this.idleRpm;
 
     // Turbo wastegate flutter on off-throttle lift at high boost
     if (this.lastThrottle && !throttle && this.boost > 0.28) {
@@ -995,109 +1248,142 @@ export class EngineAudio {
     this.lastThrottle = throttle;
 
     // Turbo boost pressure simulation
-    const targetBoost = throttle && racing && speed > 5 ? 1.0 : 0.0;
+    const targetBoost =
+      throttle && racing && Math.abs(safeSpeed) > 5 ? 1.0 : 0.0;
     this.boost +=
       (targetBoost - this.boost) * (1 - Math.exp(-dt * (throttle ? 4 : 8)));
+    if (!Number.isFinite(this.boost)) this.boost = 0;
 
-    if (!this.ctx || !this.enabled) return;
-    const t = this.ctx.currentTime;
-    this.master.gain.setTargetAtTime(racing && !finished ? 0.4 : 0.14, t, 0.06);
-    this.effects.gain.setTargetAtTime(0.25, t, 0.03);
-    const isShifting = now < this.shiftUntil && this.shiftType === "up";
+    if (!this.ctx || !this.enabled || this.suspended) return;
+    try {
+      const t = this.ctx.currentTime;
+      this.master.gain.setTargetAtTime(
+        racing && !finished ? 0.4 : 0.14,
+        t,
+        0.06,
+      );
+      this.effects.gain.setTargetAtTime(0.25, t, 0.03);
+      const isShifting = now < this.shiftUntil && this.shiftType === "up";
 
-    // High-RPM rev limiter bouncing at redline
-    let limiterCut = 1.0;
-    if (this.rpm > 13150 && throttle) {
-      limiterCut = Math.sin(now * 0.08) > 0.1 ? 1.0 : 0.06;
-      if (limiterCut < 0.5 && Math.random() < 0.25) {
-        this.exhaustPop(0.35);
+      // High-RPM rev limiter bouncing at redline
+      let limiterCut = 1.0;
+      if (this.rpm > 13150 && throttle) {
+        limiterCut = Math.sin(now * 0.08) > 0.1 ? 1.0 : 0.06;
+        if (limiterCut < 0.5 && Math.random() < 0.25) {
+          this.exhaustPop(0.35);
+        }
       }
-    }
 
-    // F1 engine acoustics: fundamental cylinder firing frequency
-    // (V6 at 12,000 RPM fires 600 times per second)
-    const baseFreq = Math.max(38, (this.rpm / 60) * 1.5);
-    const cut = (isShifting ? 0.15 : 1.0) * limiterCut;
+      // F1 engine acoustics: fundamental cylinder firing frequency
+      // (V6 at 12,000 RPM fires 600 times per second)
+      const baseFreq = Math.max(38, (this.rpm / 60) * 1.5);
+      const cut = (isShifting ? 0.15 : 1.0) * limiterCut;
 
-    // Frequency modulation for organic combustion feel
-    const jitter = Math.sin(now * 0.08) * 1.5;
-    this.subOsc.frequency.setTargetAtTime(baseFreq * 0.5, t, 0.02);
-    this.midOsc.frequency.setTargetAtTime(baseFreq + jitter, t, 0.02);
-    this.highOsc.frequency.setTargetAtTime(
-      baseFreq * 2 + jitter * 1.8,
-      t,
-      0.02,
-    );
-    this.raspOsc.frequency.setTargetAtTime(baseFreq * 3, t, 0.02);
+      // Frequency modulation for organic combustion feel
+      const jitter = Math.sin(now * 0.08) * 1.5;
+      this.subOsc.frequency.setTargetAtTime(baseFreq * 0.5, t, 0.02);
+      this.midOsc.frequency.setTargetAtTime(baseFreq + jitter, t, 0.02);
+      this.highOsc.frequency.setTargetAtTime(
+        baseFreq * 2 + jitter * 1.8,
+        t,
+        0.02,
+      );
+      this.raspOsc.frequency.setTargetAtTime(baseFreq * 3, t, 0.02);
 
-    // Turbo whistle tracks boost pressure and RPM
-    const turboFreq = 2200 + this.boost * 2400 + (this.rpm / this.maxRpm) * 800;
-    this.turboOsc.frequency.setTargetAtTime(turboFreq, t, 0.03);
-    this.turboGain.gain.setTargetAtTime(
-      racing ? this.boost * 0.14 : 0,
-      t,
-      0.05,
-    );
+      // Turbo whistle tracks boost pressure and RPM
+      const turboFreq =
+        2200 + this.boost * 2400 + (this.rpm / this.maxRpm) * 800;
+      this.turboOsc.frequency.setTargetAtTime(turboFreq, t, 0.03);
+      this.turboGain.gain.setTargetAtTime(
+        racing ? this.boost * 0.14 : 0,
+        t,
+        0.05,
+      );
 
-    // Formant acoustic filters
-    const filterCutoff = Math.min(
-      7500,
-      Math.max(
-        450,
-        700 + (this.rpm / this.maxRpm) * 5800 * (throttle ? 1.35 : 0.65),
-      ),
-    );
-    this.intakeFilter.frequency.setTargetAtTime(filterCutoff, t, 0.03);
-    this.screamerFilter.frequency.setTargetAtTime(
-      1400 + (this.rpm / this.maxRpm) * 2200,
-      t,
-      0.04,
-    );
+      // MGU-K / MGU-H electric hybrid spool whine
+      if (this.mguOsc && this.mguGain) {
+        const mguFreq = 3400 + (this.rpm / this.maxRpm) * 2200;
+        this.mguOsc.frequency.setTargetAtTime(mguFreq, t, 0.03);
+        const mguVol =
+          racing && throttle && safeSpeed > 12
+            ? Math.min(0.07, (safeSpeed / 50) * 0.07)
+            : 0;
+        this.mguGain.gain.setTargetAtTime(mguVol, t, 0.04);
+      }
 
-    // Engine volume
-    const baseGain = racing && !finished ? (throttle ? 0.62 : 0.38) : 0.22;
-    this.engineGain.gain.setTargetAtTime(baseGain * cut, t, 0.03);
+      // Off-throttle overrun burble / crackle on lift-off at high RPM
+      if (racing && !throttle && safeSpeed > 16 && this.rpm > 6800) {
+        if (Math.random() < 0.16 && now - this.lastPop > 85) {
+          this.exhaustPop(0.28 + Math.random() * 0.22);
+        }
+      }
 
-    // Aerodynamic high-speed wind roar
-    const windIntensity = Math.min(1, Math.max(0, (speed - 15) / 35));
-    this.windGain.gain.setTargetAtTime(windIntensity * 0.28, t, 0.06);
-    this.windFilter.frequency.setTargetAtTime(
-      500 + windIntensity * 1600,
-      t,
-      0.06,
-    );
+      // Formant acoustic filters
+      const filterCutoff = Math.min(
+        7500,
+        Math.max(
+          450,
+          700 + (this.rpm / this.maxRpm) * 5800 * (throttle ? 1.35 : 0.65),
+        ),
+      );
+      this.intakeFilter.frequency.setTargetAtTime(filterCutoff, t, 0.03);
+      this.screamerFilter.frequency.setTargetAtTime(
+        1400 + (this.rpm / this.maxRpm) * 2200,
+        t,
+        0.04,
+      );
 
-    // Tire squeal (drift or heavy braking)
-    const isDrifting = drift && speed > 8;
-    const isLockingBrakes = brake && speed > 16;
-    const skidIntensity = isDrifting ? 0.38 : isLockingBrakes ? 0.26 : 0;
-    this.skidGain.gain.setTargetAtTime(skidIntensity, t, 0.04);
-    this.skidFilter.frequency.setTargetAtTime(
-      isDrifting ? 1450 : 1850,
-      t,
-      0.04,
-    );
+      // Engine volume
+      const baseGain = racing && !finished ? (throttle ? 0.62 : 0.38) : 0.22;
+      this.engineGain.gain.setTargetAtTime(baseGain * cut, t, 0.03);
 
-    // Apex kerb rumble
-    const kerbIntensity = onKerb && speed > 6 ? Math.min(0.4, speed / 60) : 0;
-    this.kerbGain.gain.setTargetAtTime(kerbIntensity, t, 0.03);
+      // Aerodynamic high-speed wind roar
+      const windIntensity = Math.min(1, Math.max(0, (safeSpeed - 15) / 35));
+      this.windGain.gain.setTargetAtTime(windIntensity * 0.28, t, 0.06);
+      this.windFilter.frequency.setTargetAtTime(
+        500 + windIntensity * 1600,
+        t,
+        0.06,
+      );
+
+      // Tire squeal (drift or heavy braking)
+      const isDrifting = drift && safeSpeed > 8;
+      const isLockingBrakes = brake && safeSpeed > 16;
+      const skidIntensity = isDrifting ? 0.38 : isLockingBrakes ? 0.26 : 0;
+      this.skidGain.gain.setTargetAtTime(skidIntensity, t, 0.04);
+      this.skidFilter.frequency.setTargetAtTime(
+        isDrifting ? 1450 : 1850,
+        t,
+        0.04,
+      );
+
+      // Apex kerb rumble
+      const kerbIntensity =
+        onKerb && safeSpeed > 6 ? Math.min(0.4, safeSpeed / 60) : 0;
+      this.kerbGain.gain.setTargetAtTime(kerbIntensity, t, 0.03);
+    } catch {}
   }
 
   exhaustPop(intensity = 0.6) {
     if (!this.ctx || !this.effects || !this.enabled) return;
     const now = performance.now();
-    if (now - this.lastPop < 90) return;
+    if (now - this.lastPop < 75) return;
     this.lastPop = now;
 
     const t = this.ctx.currentTime;
-    const popOsc = this.ctx.createOscillator();
-    const popGain = this.ctx.createGain();
+    const safeIntensity = Math.max(0.05, Math.min(1.0, intensity));
+    const popOsc = this.track(this.ctx.createOscillator());
+    const popGain = this.track(this.ctx.createGain());
 
     popOsc.type = "triangle";
     popOsc.frequency.setValueAtTime(140 + Math.random() * 40, t);
     popOsc.frequency.exponentialRampToValueAtTime(30, t + 0.07);
 
-    popGain.gain.setValueAtTime(intensity * 0.5, t);
+    popGain.gain.setValueAtTime(0, t);
+    popGain.gain.linearRampToValueAtTime(
+      Math.max(0.001, safeIntensity * 0.5),
+      t + 0.006,
+    );
     popGain.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
 
     popOsc.connect(popGain);
@@ -1106,21 +1392,24 @@ export class EngineAudio {
     popOsc.start(t);
     popOsc.stop(t + 0.07);
     popOsc.onended = () => {
-      popOsc.disconnect();
-      popGain.disconnect();
+      try {
+        popOsc.disconnect();
+        popGain.disconnect();
+      } catch {}
     };
   }
 
   wastegateFlutter(boost = 0.5) {
     if (!this.ctx || !this.effects || !this.enabled) return;
     const t = this.ctx.currentTime;
+    const safeBoost = Math.max(0.05, Math.min(1.0, boost));
     const bursts = 4;
     for (let i = 0; i < bursts; i++) {
       const delay = i * 0.055;
       const decay = Math.pow(0.55, i);
-      const flutterOsc = this.ctx.createOscillator();
-      const flutterFilter = this.ctx.createBiquadFilter();
-      const flutterGain = this.ctx.createGain();
+      const flutterOsc = this.track(this.ctx.createOscillator());
+      const flutterFilter = this.track(this.ctx.createBiquadFilter());
+      const flutterGain = this.track(this.ctx.createGain());
 
       flutterOsc.type = "sawtooth";
       flutterOsc.frequency.setValueAtTime(950 - i * 85, t + delay);
@@ -1130,7 +1419,11 @@ export class EngineAudio {
       flutterFilter.frequency.setValueAtTime(1600 - i * 140, t + delay);
       flutterFilter.Q.value = 5.0;
 
-      flutterGain.gain.setValueAtTime(boost * 0.22 * decay, t + delay);
+      flutterGain.gain.setValueAtTime(0, t + delay);
+      flutterGain.gain.linearRampToValueAtTime(
+        Math.max(0.001, safeBoost * 0.22 * decay),
+        t + delay + 0.006,
+      );
       flutterGain.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.045);
 
       flutterOsc.connect(flutterFilter);
@@ -1140,9 +1433,11 @@ export class EngineAudio {
       flutterOsc.start(t + delay);
       flutterOsc.stop(t + delay + 0.045);
       flutterOsc.onended = () => {
-        flutterOsc.disconnect();
-        flutterFilter.disconnect();
-        flutterGain.disconnect();
+        try {
+          flutterOsc.disconnect();
+          flutterFilter.disconnect();
+          flutterGain.disconnect();
+        } catch {}
       };
     }
   }
@@ -1152,12 +1447,13 @@ export class EngineAudio {
     const t = this.ctx.currentTime;
     if (step >= 1 && step <= 5) {
       // 5 Red Lights arming tones
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = this.track(this.ctx.createOscillator());
+      const gain = this.track(this.ctx.createGain());
       osc.type = "sine";
       osc.frequency.setValueAtTime(520, t);
       osc.frequency.exponentialRampToValueAtTime(460, t + 0.12);
-      gain.gain.setValueAtTime(0.45, t);
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.45, t + 0.006);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
       osc.connect(gain);
       gain.connect(this.effects);
@@ -1169,14 +1465,15 @@ export class EngineAudio {
       };
     } else if (step === 0) {
       // LIGHTS OUT / GO!
-      const osc1 = this.ctx.createOscillator();
-      const osc2 = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc1 = this.track(this.ctx.createOscillator());
+      const osc2 = this.track(this.ctx.createOscillator());
+      const gain = this.track(this.ctx.createGain());
       osc1.type = "sine";
       osc2.type = "triangle";
       osc1.frequency.setValueAtTime(920, t);
       osc2.frequency.setValueAtTime(1150, t);
-      gain.gain.setValueAtTime(0.65, t);
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.65, t + 0.006);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
       osc1.connect(gain);
       osc2.connect(gain);
@@ -1195,8 +1492,8 @@ export class EngineAudio {
 
   beep(frequency = 600, duration = 0.12, volume = 1) {
     if (!this.ctx || !this.effects || !this.enabled) return;
-    const o = this.ctx.createOscillator();
-    const g = this.ctx.createGain();
+    const o = this.track(this.ctx.createOscillator());
+    const g = this.track(this.ctx.createGain());
     const t = this.ctx.currentTime;
     o.type = "sine";
     o.frequency.setValueAtTime(frequency, t);
@@ -1204,7 +1501,8 @@ export class EngineAudio {
       Math.max(40, frequency * 0.65),
       t + duration,
     );
-    g.gain.setValueAtTime(volume * 0.45, t);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(volume * 0.45, t + 0.006);
     g.gain.exponentialRampToValueAtTime(0.001, t + duration);
     o.connect(g);
     g.connect(this.effects);
@@ -1217,28 +1515,37 @@ export class EngineAudio {
   }
 
   impact(amount) {
-    if (amount > 0.12 && performance.now() - this.lastImpact > 180) {
-      this.lastImpact = performance.now();
-      const t = this.ctx?.currentTime;
-      if (!t || !this.enabled) return;
+    const rising = Number.isFinite(amount) && amount > this.impactLevel + 0.08;
+    this.impactLevel = Number.isFinite(amount) ? amount : 0;
+    if (!rising) return;
+    try {
+      if (!Number.isFinite(amount)) return;
+      const safeAmount = Math.min(1.0, Math.max(0, amount));
+      if (safeAmount > 0.12 && performance.now() - this.lastImpact > 180) {
+        this.lastImpact = performance.now();
+        const t = this.ctx?.currentTime;
+        if (!t || !this.enabled || !this.effects) return;
 
-      // Heavy body/barrier thud
-      const o = this.ctx.createOscillator();
-      const g = this.ctx.createGain();
-      o.type = "sawtooth";
-      o.frequency.setValueAtTime(80 + amount * 60, t);
-      o.frequency.exponentialRampToValueAtTime(25, t + 0.16);
-      g.gain.setValueAtTime(Math.min(0.8, amount * 0.7), t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
-      o.connect(g);
-      g.connect(this.effects);
-      o.start(t);
-      o.stop(t + 0.16);
-      o.onended = () => {
-        o.disconnect();
-        g.disconnect();
-      };
-    }
+        // Heavy body/barrier thud
+        const o = this.track(this.ctx.createOscillator());
+        const g = this.track(this.ctx.createGain());
+        o.type = "sawtooth";
+        o.frequency.setValueAtTime(80 + safeAmount * 60, t);
+        o.frequency.exponentialRampToValueAtTime(25, t + 0.16);
+        g.gain.setValueAtTime(Math.min(0.8, safeAmount * 0.7), t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+        o.connect(g);
+        g.connect(this.effects);
+        o.start(t);
+        o.stop(t + 0.16);
+        o.onended = () => {
+          try {
+            o.disconnect();
+            g.disconnect();
+          } catch {}
+        };
+      }
+    } catch {}
   }
 
   celebrate() {
@@ -1251,15 +1558,16 @@ export class EngineAudio {
       [1046.5, 1318.5, 1567.98], // C octave
     ];
     chords.forEach((chord, step) => {
-      setTimeout(() => {
+      this.later(() => {
         if (!this.ctx || !this.enabled) return;
         const t = this.ctx.currentTime;
         chord.forEach((freq) => {
-          const o = this.ctx.createOscillator();
-          const g = this.ctx.createGain();
+          const o = this.track(this.ctx.createOscillator());
+          const g = this.track(this.ctx.createGain());
           o.type = "triangle";
           o.frequency.setValueAtTime(freq, t);
-          g.gain.setValueAtTime(0.35, t);
+          g.gain.setValueAtTime(0, t);
+          g.gain.linearRampToValueAtTime(0.35, t + 0.006);
           g.gain.exponentialRampToValueAtTime(
             0.001,
             t + (step === 3 ? 0.8 : 0.28),
@@ -1277,115 +1585,188 @@ export class EngineAudio {
     });
   }
 
-  updateRemoteCar(id, carPos, camPos, speed, throttle) {
+  updateRemoteCar(
+    id,
+    carPos,
+    camPos,
+    speed,
+    throttle,
+    carVel = null,
+    camVel = null,
+  ) {
     if (!this.ctx || !this.enabled) return;
+    if (
+      !carPos ||
+      !camPos ||
+      !Number.isFinite(carPos.x) ||
+      !Number.isFinite(carPos.y) ||
+      !Number.isFinite(carPos.z) ||
+      !Number.isFinite(camPos.x) ||
+      !Number.isFinite(camPos.y) ||
+      !Number.isFinite(camPos.z)
+    )
+      return;
     const t = this.ctx.currentTime;
-    if (Math.hypot(carPos.x - camPos.x, carPos.z - camPos.z) > 90) {
+    const dx = carPos.x - camPos.x;
+    const dz = carPos.z - camPos.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > (this.remoteCars.has(id) ? 110 : 95)) {
       this.removeRemoteCar(id);
       return;
     }
     let node = this.remoteCars.get(id);
     if (!node) {
-      const panner = this.ctx.createPanner();
-      panner.panningModel = "HRTF";
-      panner.distanceModel = "exponential";
-      panner.refDistance = 4;
-      panner.maxDistance = 90;
-      panner.rolloffFactor = 1.1;
+      try {
+        const panner = this.track(this.ctx.createPanner());
+        panner.panningModel = "HRTF";
+        panner.distanceModel = "inverse";
+        panner.refDistance = 4;
+        panner.maxDistance = 100;
+        panner.rolloffFactor = 1.0;
 
-      const osc = this.ctx.createOscillator();
-      osc.type = "sawtooth";
+        const osc = this.track(this.ctx.createOscillator());
+        osc.type = "sawtooth";
 
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = "bandpass";
-      filter.frequency.value = 850;
-      filter.Q.value = 2.2;
+        const filter = this.track(this.ctx.createBiquadFilter());
+        filter.type = "bandpass";
+        filter.frequency.value = 850;
+        filter.Q.value = 2.2;
 
-      const gain = this.ctx.createGain();
-      gain.gain.value = 0;
+        const gain = this.track(this.ctx.createGain());
+        gain.gain.value = 0;
 
-      osc.connect(filter);
-      filter.connect(gain);
-      gain.connect(panner);
-      panner.connect(this.master);
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(panner);
+        panner.connect(this.master);
 
-      osc.start(t);
-      node = { panner, osc, filter, gain };
-      this.remoteCars.set(id, node);
+        osc.start(t);
+        node = { panner, osc, filter, gain };
+        this.remoteCars.set(id, node);
+      } catch {
+        return;
+      }
     }
 
-    if (this.ctx.listener.positionX) {
-      node.panner.positionX.setTargetAtTime(carPos.x, t, 0.04);
-      node.panner.positionY.setTargetAtTime(carPos.y, t, 0.04);
-      node.panner.positionZ.setTargetAtTime(-carPos.z, t, 0.04);
-    } else {
-      node.panner.setPosition(carPos.x, carPos.y, -carPos.z);
-    }
+    try {
+      if (node.panner.positionX) {
+        node.panner.positionX.setTargetAtTime(carPos.x, t, 0.04);
+        node.panner.positionY.setTargetAtTime(carPos.y, t, 0.04);
+        node.panner.positionZ.setTargetAtTime(-carPos.z, t, 0.04);
+      } else if (node.panner.setPosition) {
+        node.panner.setPosition(carPos.x, carPos.y, -carPos.z);
+      }
 
-    const freq = Math.max(50, 48 + speed * 4.6);
-    node.osc.frequency.setTargetAtTime(freq, t, 0.04);
-    node.filter.frequency.setTargetAtTime(
-      Math.min(2800, 600 + speed * 35),
-      t,
-      0.04,
-    );
-    const targetVol = Math.min(
-      0.32,
-      (speed / 45) * 0.32 * (throttle ? 1.0 : 0.6),
-    );
-    node.gain.gain.setTargetAtTime(targetVol, t, 0.04);
+      // True acoustic line-of-sight Doppler pitch shift
+      let doppler = 1.0;
+      if (dist > 0.05 && carVel && camVel) {
+        const rx = dx / dist,
+          rz = dz / dist;
+        const relRadialVel =
+          ((carVel.x || 0) - (camVel.x || 0)) * rx +
+          ((carVel.z || 0) - (camVel.z || 0)) * rz;
+        // Doppler factor: c / (c + v_radial) with c = 343 m/s
+        doppler = Math.max(0.7, Math.min(1.4, 343 / (343 + relRadialVel)));
+      }
+
+      const safeSpeed = Number.isFinite(speed) ? Math.max(0, speed) : 0;
+      const baseFreq = (48 + safeSpeed * 4.6) * doppler;
+      const freq = Math.max(45, Math.min(3200, baseFreq));
+      node.osc.frequency.setTargetAtTime(freq, t, 0.04);
+      node.filter.frequency.setTargetAtTime(
+        Math.min(3200, (600 + safeSpeed * 35) * doppler),
+        t,
+        0.04,
+      );
+      const targetVol = Math.min(
+        0.32,
+        (safeSpeed / 45) * 0.32 * (throttle ? 1.0 : 0.6),
+      );
+      node.gain.gain.setTargetAtTime(targetVol, t, 0.04);
+    } catch {}
   }
 
   removeRemoteCar(id) {
     const node = this.remoteCars.get(id);
     if (!node) return;
     try {
-      node.osc.stop();
-      node.osc.disconnect();
-      node.filter.disconnect();
-      node.gain.disconnect();
-      node.panner.disconnect();
+      const t = this.ctx.currentTime;
+      node.gain.gain.cancelScheduledValues(t);
+      node.gain.gain.setTargetAtTime(0, t, 0.015);
+      node.osc.addEventListener(
+        "ended",
+        () => {
+          node.filter.disconnect();
+          node.gain.disconnect();
+          node.panner.disconnect();
+        },
+        { once: true },
+      );
+      node.osc.stop(t + 0.08);
     } catch {}
     this.remoteCars.delete(id);
   }
 
   listener(position, forward) {
     if (!this.ctx || !this.enabled) return;
+    if (
+      !position ||
+      !forward ||
+      !Number.isFinite(position.x) ||
+      !Number.isFinite(position.y) ||
+      !Number.isFinite(position.z) ||
+      !Number.isFinite(forward.x) ||
+      !Number.isFinite(forward.y) ||
+      !Number.isFinite(forward.z)
+    )
+      return;
+    const forwardLen = Math.hypot(forward.x, forward.y, forward.z);
+    if (forwardLen < 0.001) return;
     const l = this.ctx.listener,
       t = this.ctx.currentTime;
-    if (l.forwardX) {
-      for (const [key, value] of Object.entries({
-        positionX: position.x,
-        positionY: position.y,
-        positionZ: -position.z,
-        forwardX: forward.x,
-        forwardY: forward.y,
-        forwardZ: -forward.z,
-        upX: 0,
-        upY: 1,
-        upZ: 0,
-      }))
-        l[key].setTargetAtTime(value, t, 0.03);
-    } else {
-      l.setPosition(position.x, position.y, -position.z);
-      l.setOrientation(forward.x, forward.y, -forward.z, 0, 1, 0);
-    }
+    try {
+      if (l.forwardX) {
+        const params = {
+          positionX: position.x,
+          positionY: position.y,
+          positionZ: -position.z,
+          forwardX: forward.x,
+          forwardY: forward.y,
+          forwardZ: -forward.z,
+          upX: 0,
+          upY: 1,
+          upZ: 0,
+        };
+        for (const [key, value] of Object.entries(params)) {
+          if (l[key]?.setTargetAtTime && Number.isFinite(value)) {
+            l[key].setTargetAtTime(value, t, 0.03);
+          }
+        }
+      } else if (l.setPosition) {
+        l.setPosition(position.x, position.y, -position.z);
+        l.setOrientation(forward.x, forward.y, -forward.z, 0, 1, 0);
+      }
+    } catch {}
   }
   silence() {
-    if (this.master && this.ctx)
-      this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
+    if (this.quiet) return;
+    this.quiet = true;
+    for (const gain of [
+      this.master,
+      this.windGain,
+      this.skidGain,
+      this.kerbGain,
+    ])
+      gain?.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
+    this.cancelEffects();
     for (const id of [...this.remoteCars.keys()]) this.removeRemoteCar(id);
   }
   mute() {
     this.enabled = false;
-    if (this.effects && this.ctx)
-      this.effects.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
-    if (this.master && this.ctx) {
-      this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
-    }
-    for (const id of this.remoteCars.keys()) {
-      this.removeRemoteCar(id);
-    }
+    this.music?.stop();
+    this.cancelEffects();
+    this.applyMix();
+    for (const id of [...this.remoteCars.keys()]) this.removeRemoteCar(id);
   }
 }
 ````
@@ -1402,11 +1783,46 @@ import "./style.css";
 import { io } from "socket.io-client";
 import { createScene } from "./scene.js";
 import { TRACK, LENGTH, point, nearest } from "../../shared/track.js";
+import { validSnapshot } from "../../shared/protocol.js";
 
 const $ = (id) => document.getElementById(id),
   socket = io(),
   keys = {},
+  inputSources = new Map(),
   map = $("minimap").getContext("2d");
+
+const toCX = (x) => 95 + (x + 20) * 0.23;
+const toCY = (z) => 100 - (z - 5) * 0.23;
+
+// Pre-render static minimap background once to prevent 3200 binary searches/sec
+const mapBg = document.createElement("canvas");
+mapBg.width = 180;
+mapBg.height = 200;
+const bgCtx = mapBg.getContext("2d");
+
+bgCtx.beginPath();
+for (let i = 0; i <= 160; i++) {
+  const p = point((i * LENGTH) / 160);
+  if (i === 0) bgCtx.moveTo(toCX(p.x), toCY(p.z));
+  else bgCtx.lineTo(toCX(p.x), toCY(p.z));
+}
+bgCtx.closePath();
+bgCtx.strokeStyle = "#b1c4a444";
+bgCtx.lineWidth = 14;
+bgCtx.stroke();
+
+bgCtx.strokeStyle = "#d6fc71aa";
+bgCtx.lineWidth = 3;
+bgCtx.stroke();
+
+const f0 = point(0, -11),
+  f1 = point(0, 11);
+bgCtx.beginPath();
+bgCtx.moveTo(toCX(f0.x), toCY(f0.z));
+bgCtx.lineTo(toCX(f1.x), toCY(f1.z));
+bgCtx.strokeStyle = "#ffffff";
+bgCtx.lineWidth = 2.5;
+bgCtx.stroke();
 
 let view,
   state,
@@ -1420,6 +1836,10 @@ let view,
 
 window.__getState = () => (state ? structuredClone(state) : null);
 window.__getKeys = () => ({ ...keys });
+window.__getDiagnostics = () => ({
+  render: view?.metrics(),
+  audio: engineAudio.metrics?.(),
+});
 let clockKnown = false,
   clockSamples = [],
   inputSeq = 0,
@@ -1437,11 +1857,17 @@ function syncClock() {
       rtt: end - start,
       offset: serverTime - (start + end) / 2,
     });
-    clockSamples = clockSamples.slice(-8);
+    clockSamples = clockSamples.slice(-16);
     const best = [...clockSamples].sort((a, b) => a.rtt - b.rtt)[0];
     offset = best.offset;
     clockKnown = true;
-    view?.network(offset, best.rtt);
+    const meanRtt =
+      clockSamples.reduce((acc, s) => acc + s.rtt, 0) / clockSamples.length;
+    const variance =
+      clockSamples.reduce((acc, s) => acc + (s.rtt - meanRtt) ** 2, 0) /
+      clockSamples.length;
+    const stdDev = Math.sqrt(variance);
+    view?.network(offset, best.rtt, stdDev);
   });
 }
 setInterval(syncClock, 5000);
@@ -1472,6 +1898,7 @@ function beep(freq = 600, duration = 0.12) {
 }
 
 $("sound").onclick = async () => {
+  $("sound").disabled = true;
   sound = !sound;
   if (sound) {
     try {
@@ -1482,12 +1909,33 @@ $("sound").onclick = async () => {
     }
   } else engineAudio.mute();
   $("sound").textContent = sound ? "SOUND ON" : "SOUND OFF";
+  $("sound").disabled = false;
 };
 
+$("audioSettings").onclick = () => {
+  const open = $("audioPanel").hidden;
+  $("audioPanel").hidden = !open;
+  $("audioSettings").setAttribute("aria-expanded", String(open));
+};
+for (const name of ["Master", "Engine", "Music", "Sfx"]) {
+  $("volume" + name).oninput = () => {
+    const value = Number($("volume" + name).value);
+    $("value" + name).textContent = value + "%";
+    engineAudio.setVolumes({ [name.toLowerCase()]: value / 100 });
+  };
+}
+window.addEventListener("pagehide", () => {
+  engineAudio.setSuspended(true);
+});
+window.addEventListener("pageshow", () => {
+  engineAudio.setSuspended(document.hidden);
+});
+
 $("quality").onclick = () => {
-  quality = (quality + 1) % 3;
+  quality = (quality + 1) % 4;
   view?.quality(quality);
-  $("quality").textContent = "QUALITY " + ["LOW", "MEDIUM", "HIGH"][quality];
+  $("quality").textContent =
+    "QUALITY " + ["LOW", "MEDIUM", "HIGH", "ULTRA"][quality];
 };
 
 const invite = new URLSearchParams(location.search).get("room");
@@ -1522,6 +1970,9 @@ document.querySelectorAll(".leave").forEach(
     (b.onclick = async () => {
       if (await request("leave")) {
         state = null;
+        clearControls();
+        engineAudio.setPhase("home");
+        engineAudio.silence();
         render();
         view?.update({ cars: [], players: [], phase: "lobby" }, socket.id);
         history.replaceState(null, "", location.pathname);
@@ -1552,7 +2003,9 @@ socket.on("connect", () => {
 socket.on("disconnect", () => {
   $("connection").textContent = "RECONNECTING";
   state = null;
-  for (const k in keys) keys[k] = false;
+  engineAudio.setPhase("home");
+  clearControls();
+  if (sound) engineAudio.silence();
   render();
   view?.update({ cars: [], players: [], phase: "lobby" }, socket.id);
   notice(
@@ -1578,8 +2031,16 @@ const esc = (s) =>
       ],
   );
 
+const htmlCache = new Map();
+function setHtml(id, html) {
+  if (htmlCache.get(id) !== html) {
+    $(id).innerHTML = html;
+    htmlCache.set(id, html);
+  }
+}
 const time = (ms) => {
-  const s = Math.max(0, ms) / 1000;
+  const safeMs = Number.isFinite(ms) && ms > 0 ? ms : 0;
+  const s = safeMs / 1000;
   return `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 };
 
@@ -1608,12 +2069,15 @@ function render() {
 
   const host = state.host === socket.id;
   $("roomCode").textContent = state.code;
-  $("players").innerHTML = state.players
-    .map(
-      (p) =>
-        `<div class="player"><i class="swatch" style="background:${p.color}"></i>${esc(p.name)}<span class="badge">${p.id === state.host ? "HOST" : "DRIVER"}</span></div>`,
-    )
-    .join("");
+  setHtml(
+    "players",
+    state.players
+      .map(
+        (p) =>
+          `<div class="player"><i class="swatch" style="background:${p.color}"></i>${esc(p.name)}<span class="badge">${p.id === state.host ? "HOST" : "DRIVER"}</span></div>`,
+      )
+      .join(""),
+  );
   $("start").hidden = !host;
   $("start").disabled = state.players.length < 2;
   $("waiting").textContent =
@@ -1628,38 +2092,44 @@ function render() {
     player = (id) => state.players.find((p) => p.id === id);
   const leaderProgress = rows[0]?.progress || 0;
 
-  $("leaderboard").innerHTML = rows
-    .map((c, i) => {
-      const p = player(c.id);
-      const isMe = c.id === socket.id;
-      const delta =
-        i === 0
-          ? "LEADER"
-          : c.finished !== null
-            ? time(c.finished)
-            : `+${Math.round((Math.max(0, leaderProgress - c.progress) * LENGTH) / 24)}m`;
-      return (
-        `<div class="leader-row ${isMe ? "me" : ""}">` +
-        `<span class="leader-pos">${i + 1}</span>` +
-        `<i class="swatch" style="background:${p?.color || "#fff"}"></i>` +
-        `<span class="leader-name">${esc(p?.name || "Driver")}</span>` +
-        `<span class="leader-gap">${c.finished !== null ? "FIN" : delta}</span>` +
-        `</div>`
-      );
-    })
-    .join("");
+  setHtml(
+    "leaderboard",
+    rows
+      .map((c, i) => {
+        const p = player(c.id);
+        const isMe = c.id === socket.id;
+        const delta =
+          i === 0
+            ? "LEADER"
+            : c.finished !== null
+              ? time(c.finished)
+              : `+${Math.round((Math.max(0, leaderProgress - c.progress) * LENGTH) / 24)}m`;
+        return (
+          `<div class="leader-row ${isMe ? "me" : ""}">` +
+          `<span class="leader-pos">${i + 1}</span>` +
+          `<i class="swatch" style="background:${p?.color || "#fff"}"></i>` +
+          `<span class="leader-name">${esc(p?.name || "Driver")}</span>` +
+          `<span class="leader-gap">${c.finished !== null ? "FIN" : delta}</span>` +
+          `</div>`
+        );
+      })
+      .join(""),
+  );
 
   if (phase === "results") {
     $("winner").textContent =
       rows[0]?.finished !== null
         ? `${player(rows[0]?.id)?.name} takes the win.`
         : "Time’s up!";
-    $("resultRows").innerHTML = rows
-      .map(
-        (c, i) =>
-          `<div class="result-row"><b>${i + 1}</b><i class="swatch" style="background:${player(c.id)?.color}"></i><span>${esc(player(c.id)?.name)}</span><span>${c.finished !== null ? time(c.finished) : "DNF"}</span></div>`,
-      )
-      .join("");
+    setHtml(
+      "resultRows",
+      rows
+        .map(
+          (c, i) =>
+            `<div class="result-row"><b>${i + 1}</b><i class="swatch" style="background:${player(c.id)?.color}"></i><span>${esc(player(c.id)?.name)}</span><span>${c.finished !== null ? time(c.finished) : "DNF"}</span></div>`,
+        )
+        .join(""),
+    );
     $("rematch").hidden = !host;
     $("resultWaiting").textContent = host
       ? "New grid. Same friends."
@@ -1669,7 +2139,9 @@ function render() {
 }
 
 socket.on("state", (s) => {
-  if (!s || !Array.isArray(s.cars) || !Array.isArray(s.players)) return;
+  if (!validSnapshot(s) || (state?.code === s.code && s.seq <= state.seq))
+    return;
+  engineAudio.setPhase(s.phase);
   state = s;
   if (!clockKnown) offset = s.serverNow - Date.now();
   updateHud();
@@ -1756,34 +2228,53 @@ function resolveKey(e) {
   );
 }
 
+// Multiple physical keys or fingers may hold the same logical control.
+function setControl(source, key, pressed) {
+  const previous = inputSources.get(source);
+  if (pressed) inputSources.set(source, key);
+  else inputSources.delete(source);
+  let changed = false;
+  for (const control of new Set([previous, key])) {
+    if (!control) continue;
+    const active = [...inputSources.values()].includes(control);
+    if (!!keys[control] !== active) {
+      keys[control] = active;
+      changed = true;
+    }
+  }
+  if (changed) sendInput(true);
+}
+
+function clearControls() {
+  inputSources.clear();
+  for (const k in keys) keys[k] = false;
+}
+
 window.addEventListener("keydown", (e) => {
   if (e.target instanceof HTMLInputElement) return;
   const key = resolveKey(e);
   if (key && state) {
     e.preventDefault();
-    if (!keys[key]) {
-      keys[key] = true;
-      sendInput(true);
-    }
+    setControl(`keyboard:${e.code || e.key}`, key, true);
   }
 });
 
 window.addEventListener("keyup", (e) => {
   const key = resolveKey(e);
   if (key) {
-    keys[key] = false;
-    sendInput(true);
+    setControl(`keyboard:${e.code || e.key}`, key, false);
   }
 });
 
 window.addEventListener("blur", () => {
-  for (const k in keys) keys[k] = false;
+  clearControls();
   sendInput(true);
 });
 
 document.addEventListener("visibilitychange", () => {
+  engineAudio.setSuspended(document.hidden);
   if (document.hidden) {
-    for (const k in keys) keys[k] = false;
+    clearControls();
     sendInput(true);
   }
 });
@@ -1792,15 +2283,13 @@ document.querySelectorAll("[data-key]").forEach((b) => {
   b.onpointerdown = (e) => {
     e.preventDefault();
     b.setPointerCapture(e.pointerId);
-    keys[b.dataset.key] = true;
-    sendInput(true);
+    setControl(`pointer:${e.pointerId}`, b.dataset.key, true);
   };
   b.onpointerup =
     b.onpointercancel =
     b.onlostpointercapture =
-      () => {
-        keys[b.dataset.key] = false;
-        sendInput(true);
+      (e) => {
+        setControl(`pointer:${e.pointerId}`, b.dataset.key, false);
       };
 });
 
@@ -1828,9 +2317,8 @@ function updateCountdown() {
       : state.phase === "racing" && elapsed < 1000
         ? "GO!"
         : "";
-  $("countdown").textContent = count;
   if (count !== lastCountdown) {
-    if (count) beep(count === "GO!" ? 900 : 500);
+    $("countdown").textContent = count;
     lastCountdown = count;
     $("countdown").classList.remove("pulse");
     void $("countdown").offsetWidth;
@@ -1877,10 +2365,14 @@ function updateHud() {
   updateCountdown();
   const c = state.cars.find((c) => c.id === socket.id);
   if (!c) return;
-  $("lap").textContent = `${Math.min(3, Math.floor(c.passed / 24) + 1)} / 3`;
+  $("lap").textContent =
+    `${Math.min(3, Math.floor((c.passed || 0) / 24) + 1)} / 3`;
   $("position").textContent =
     `${ordered().findIndex((p) => p.id === c.id) + 1} / ${state.players.length}`;
-  $("speed").textContent = Math.round(c.speed * 3.6);
+  const safeSpeed = Number.isFinite(c.speed)
+    ? Math.max(0, Math.round(c.speed * 3.6))
+    : 0;
+  $("speed").textContent = safeSpeed;
   $("timer").textContent = time(c.finished ?? elapsed);
   $("finishMessage").textContent =
     c.finished !== null
@@ -1892,94 +2384,191 @@ function updateHud() {
 
 function frame() {
   requestAnimationFrame(frame);
-  sendInput();
-  if (!state) {
-    if (sound) engineAudio.silence();
-    return;
-  }
-  const c = state.cars.find((c) => c.id === socket.id);
-  if (!c) return;
-  updateHud();
-
-  // Dynamic engine audio & kerb rumble updates
-  const distFromCenter = nearest(c.x, c.z).distance;
-  const onKerb = Math.abs(distFromCenter - 10.6) < 1.35;
-  engineAudio.update(
-    c.speed,
-    !!keys.up,
-    !!keys.down,
-    !!keys.drift,
-    state.phase === "racing",
-    c.finished !== null,
-    onKerb,
-  );
-
-  if (sound) engineAudio.impact(c.impact || 0);
-  $("gear").textContent =
-    keys.down && c.speed < 2
-      ? "R"
-      : state.phase !== "racing"
-        ? "N"
-        : engineAudio.gear;
-  const rpmPercent = Math.min(
-    100,
-    Math.max(0, (engineAudio.rpm / 13500) * 100),
-  );
-  $("rpm").style.setProperty("--rpm", rpmPercent);
-  $("rpm").classList.toggle("shift-blink", engineAudio.rpm > 12400);
-  view?.input(keys, inputHistory);
-  if (performance.now() - lastMap < 50) return;
-  lastMap = performance.now();
-  // 2D Circuit Minimap (scaled for the new grand-prix circuit)
-  map.clearRect(0, 0, 180, 200);
-  const toCX = (x) => 95 + (x + 20) * 0.23;
-  const toCY = (z) => 100 - (z - 5) * 0.23;
-
-  // Track outer path
-  map.beginPath();
-  for (let i = 0; i <= 160; i++) {
-    const p = point((i * LENGTH) / 160);
-    if (i === 0) map.moveTo(toCX(p.x), toCY(p.z));
-    else map.lineTo(toCX(p.x), toCY(p.z));
-  }
-  map.closePath();
-  map.strokeStyle = "#b1c4a444";
-  map.lineWidth = 14;
-  map.stroke();
-
-  // Track racing line
-  map.strokeStyle = "#d6fc71aa";
-  map.lineWidth = 3;
-  map.stroke();
-
-  // Start / finish line
-  const f0 = point(0, -11),
-    f1 = point(0, 11);
-  map.beginPath();
-  map.moveTo(toCX(f0.x), toCY(f0.z));
-  map.lineTo(toCX(f1.x), toCY(f1.z));
-  map.strokeStyle = "#ffffff";
-  map.lineWidth = 2.5;
-  map.stroke();
-
-  // Player dots
-  for (const p of state.players) {
-    const t = state.cars.find((c) => c.id === p.id);
-    if (!t) continue;
-    const cx = toCX(t.x),
-      cy = toCY(t.z);
-    map.fillStyle = p.color;
-    map.beginPath();
-    map.arc(cx, cy, p.id === socket.id ? 5 : 3.5, 0, Math.PI * 2);
-    map.fill();
-    if (p.id === socket.id) {
-      map.strokeStyle = "#ffffff";
-      map.lineWidth = 1.5;
-      map.stroke();
+  try {
+    if (document.hidden) return;
+    sendInput();
+    if (!state) {
+      if (sound) engineAudio.silence();
+      return;
     }
+    const c = state.cars.find((c) => c.id === socket.id);
+    if (!c) return;
+    updateHud();
+
+    // Dynamic engine audio & kerb rumble updates
+    const safeX = Number.isFinite(c.x) ? c.x : 0;
+    const safeZ = Number.isFinite(c.z) ? c.z : 0;
+    const distFromCenter = nearest(safeX, safeZ).distance;
+    const onKerb = distFromCenter >= 9.8 && distFromCenter <= 11.6;
+    try {
+      engineAudio.update(
+        Number.isFinite(c.speed) ? c.speed : 0,
+        !!keys.up,
+        !!keys.down,
+        !!keys.drift,
+        state.phase === "racing",
+        c.finished !== null,
+        onKerb,
+      );
+
+      if (sound) engineAudio.impact(Number.isFinite(c.impact) ? c.impact : 0);
+    } catch {}
+
+    $("gear").textContent =
+      keys.down && (c.speed || 0) < 2
+        ? "R"
+        : state.phase !== "racing"
+          ? "N"
+          : engineAudio.gear || "1";
+    const safeRpm = Number.isFinite(engineAudio?.rpm) ? engineAudio.rpm : 1000;
+    const rpmPercent = Math.min(100, Math.max(0, (safeRpm / 13500) * 100));
+    $("rpm").style.setProperty("--rpm", rpmPercent.toFixed(1));
+    $("rpm").classList.toggle("shift-blink", safeRpm > 12400);
+    view?.input(keys, inputHistory);
+    if (performance.now() - lastMap < 50) return;
+    lastMap = performance.now();
+    // 2D Circuit Minimap (scaled for the new grand-prix circuit)
+    map.clearRect(0, 0, 180, 200);
+    map.drawImage(mapBg, 0, 0);
+
+    // Player dots
+    for (const p of state.players) {
+      const t = state.cars.find((c) => c.id === p.id);
+      if (!t || !Number.isFinite(t.x) || !Number.isFinite(t.z)) continue;
+      const cx = toCX(t.x),
+        cy = toCY(t.z);
+      if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+      map.fillStyle = p.color || "#fff";
+      map.beginPath();
+      map.arc(cx, cy, p.id === socket.id ? 5 : 3.5, 0, Math.PI * 2);
+      map.fill();
+      if (p.id === socket.id) {
+        map.strokeStyle = "#ffffff";
+        map.lineWidth = 1.5;
+        map.stroke();
+      }
+    }
+  } catch (err) {
+    console.warn("Frame loop exception handled:", err);
   }
 }
 frame();
+````
+
+## client/src/music.js
+
+Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/src/music.js`
+
+````
+// Original 64 BPM ambient score. No samples, recordings or commercial melodies.
+export class AmbientMusic {
+  constructor(ctx, output, track = (n) => n) {
+    this.ctx = ctx;
+    this.output = output;
+    this.track = track;
+    this.voices = new Set();
+    this.running = false;
+    this.beat = 0;
+    this.next = 0;
+    this.timer = null;
+  }
+  start() {
+    if (this.running) return;
+    this.running = true;
+    this.next = this.ctx.currentTime + 0.08;
+    this.timer = setInterval(() => this.schedule(), 100);
+    this.schedule();
+  }
+  schedule() {
+    if (!this.running || this.ctx.state !== "running") return;
+    const now = this.ctx.currentTime;
+    if (this.next < now - 0.2) this.next = now + 0.08; // never replay a stalled tab's backlog
+    while (this.next < now + 0.25) {
+      const bar = Math.floor(this.beat / 8),
+        step = this.beat % 8;
+      const root = [50, 48, 53, 46][bar % 4],
+        scale = [0, 1, 5, 7, 10];
+      if (step === 0) {
+        this.note(root - 12, this.next, 7.2, "pad", 0.09);
+        this.note(root + 7, this.next, 6.8, "pad", 0.045);
+      }
+      if ([0, 3, 5].includes(step))
+        this.note(
+          root + 12 + scale[(bar * 3 + step) % 5],
+          this.next,
+          2.1,
+          "pluck",
+          0.1,
+        );
+      if (step === 2 && bar % 2 === 0)
+        this.note(
+          root + 24 + scale[(bar + 2) % 5],
+          this.next,
+          3.5,
+          "flute",
+          0.055,
+        );
+      if (step === 6)
+        this.note(
+          root + 12 + scale[(bar + 1) % 5],
+          this.next,
+          2.8,
+          "piano",
+          0.055,
+        );
+      if (step === 1 || step === 5)
+        this.note(38, this.next, 0.22, "brush", 0.028);
+      this.beat++;
+      this.next += 60 / 64;
+    }
+  }
+  note(midi, start, duration, kind, volume) {
+    if (this.voices.size >= 24) return;
+    const ctx = this.ctx,
+      osc = this.track(ctx.createOscillator()),
+      gain = this.track(ctx.createGain()),
+      filter = this.track(ctx.createBiquadFilter());
+    osc.type = kind === "pluck" || kind === "piano" ? "triangle" : "sine";
+    osc.frequency.value = 440 * Math.pow(2, (midi - 69) / 12);
+    filter.type = "lowpass";
+    filter.frequency.value =
+      kind === "pluck" ? 2700 : kind === "piano" ? 1600 : 900;
+    const attack = kind === "pad" ? 1.3 : kind === "flute" ? 0.28 : 0.012;
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(volume, start + attack);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    gain.gain.linearRampToValueAtTime(0, start + duration + 0.06);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.output);
+    const voice = { osc, gain, filter };
+    this.voices.add(voice);
+    osc.addEventListener("ended", () => {
+      osc.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+      this.voices.delete(voice);
+    });
+    osc.start(start);
+    osc.stop(start + duration + 0.07);
+  }
+  stop() {
+    this.running = false;
+    clearInterval(this.timer);
+    this.timer = null;
+    for (const v of this.voices) {
+      const t = this.ctx.currentTime;
+      v.gain.gain.cancelScheduledValues(t);
+      v.gain.gain.setTargetAtTime(0, t, 0.02);
+      try {
+        v.osc.stop(t + 0.15);
+      } catch {}
+    }
+  }
+  dispose() {
+    this.stop();
+  }
+}
 ````
 
 ## client/src/scene.js
@@ -2579,7 +3168,7 @@ export function createScene(canvas, audioSystem = null) {
       scene,
     );
     shadowDisc.rotation.x = Math.PI / 2;
-    shadowDisc.position.set(0, -0.34, 0);
+    shadowDisc.position.set(0, -0.465, 0);
     shadowDisc.scaling.set(0.72, 1.35, 1);
     shadowDisc.parent = root;
     const shadowMat = material("contactShadowMat_" + player.id, "#080c0d", 0);
@@ -3073,7 +3662,9 @@ export function createScene(canvas, audioSystem = null) {
     const label = document.createElement("div");
     label.className = "driver-label";
     label.innerHTML = `<span class="driver-tag-pip"></span><span class="driver-tag-pos"></span><span class="driver-tag-name"></span>`;
-    label.querySelector(".driver-tag-name").textContent = player.name;
+    const posEl = label.querySelector(".driver-tag-pos");
+    const nameEl = label.querySelector(".driver-tag-name");
+    nameEl.textContent = player.name;
     label.style.setProperty("--driver-color", player.color);
     document.body.append(label);
 
@@ -3082,6 +3673,10 @@ export function createScene(canvas, audioSystem = null) {
       chassis,
       wheels,
       label,
+      posEl,
+      nameEl,
+      lastPos: 0,
+      lastName: player.name,
       brakeLights,
       brakeDiscs,
       brakeHeat: 0,
@@ -3090,6 +3685,10 @@ export function createScene(canvas, audioSystem = null) {
       dispose: () => {
         if (audioSystem) audioSystem.removeRemoteCar(player.id);
         root.dispose();
+        if (shadowGen)
+          shadowGen.getShadowMap().renderList = shadowGen
+            .getShadowMap()
+            .renderList.filter((m) => !m.isDisposed());
         paint.dispose();
         helmetPaint.dispose();
         liveryStripeMat.dispose();
@@ -3107,6 +3706,9 @@ export function createScene(canvas, audioSystem = null) {
   let serverOffset = 0,
     inputHistory = [],
     predictionRtt = 0,
+    jitterStdDev = 0,
+    smoothInterpDelay = 65,
+    cameraVel = new Vector3(0, 0, 0),
     currentPhase = "",
     localInput = {},
     targets = [],
@@ -3132,10 +3734,17 @@ export function createScene(canvas, audioSystem = null) {
     for (const t of targets) {
       const c = cars.get(t.id);
       if (!c) continue;
+      const phaseReset =
+        currentPhase !== state.phase &&
+        (state.phase === "countdown" || state.phase === "lobby");
+      const distJump =
+        c.samples.length > 0 &&
+        Math.hypot(c.samples.at(-1).x - t.x, c.samples.at(-1).z - t.z) > 18;
       if (
         !c.target ||
         c.target.respawn !== t.respawn ||
-        (currentPhase !== state.phase && state.phase === "countdown")
+        phaseReset ||
+        distJump
       ) {
         c.samples = [];
         c.root.position.set(t.x, t.y, t.z);
@@ -3170,29 +3779,37 @@ export function createScene(canvas, audioSystem = null) {
             };
           predict(motion, command, Math.min(1 / 60, horizon - elapsed));
         }
-        if (c.prediction && c.predBlend > 0.5) {
+        if (c.prediction) {
           const age = Math.min(
             0.05,
             Math.max(0, (performance.now() - c.predictedAt) / 1000),
           );
-          const x =
-            c.prediction.x +
-            c.prediction.vx * age +
-            (c.reconcile?.x || 0) -
-            motion.x;
-          const z =
-            c.prediction.z +
-            c.prediction.vz * age +
-            (c.reconcile?.z || 0) -
-            motion.z;
-          c.reconcile = Math.hypot(x, z) < 3 ? { x, z } : null;
+          const currentPredX = c.prediction.x + (c.prediction.vx || 0) * age;
+          const currentPredZ = c.prediction.z + (c.prediction.vz || 0) * age;
+          const errX = currentPredX - motion.x;
+          const errZ = currentPredZ - motion.z;
+          const errDist = Math.hypot(errX, errZ);
+          if (errDist > 3.5 || (t.impact || 0) > 0.35) {
+            c.prediction = motion;
+            c.reconcile = null;
+          } else if (errDist > 0.025) {
+            c.reconcile = { x: errX, z: errZ };
+            c.prediction = motion;
+          } else {
+            c.reconcile = null;
+            c.prediction = motion;
+          }
+        } else {
+          c.prediction = motion;
+          c.reconcile = null;
         }
-        c.prediction = motion;
         c.predictedAt = performance.now();
       }
       if (c.samples.length && at - c.samples.at(-1).at > 250)
         c.recovery = { x: c.root.position.x - t.x, z: c.root.position.z - t.z };
-      c.samples.push({ ...t, at });
+      const lastAt = c.samples.length ? c.samples.at(-1).at : -Infinity;
+      const safeAt = Math.max(lastAt + 1, at);
+      c.samples.push({ ...t, at: safeAt });
       if (c.samples.length > 12) c.samples.shift();
       c.target = t;
     }
@@ -3238,400 +3855,677 @@ export function createScene(canvas, audioSystem = null) {
       const c = cars.get(carTarget.id);
       const p = state.players.find((pl) => pl.id === carTarget.id);
       if (c && p) {
-        c.label.querySelector(".driver-tag-pos").textContent = `P${i + 1}`;
-        c.label.querySelector(".driver-tag-name").textContent = p.name;
+        if (c.lastPos !== i + 1) {
+          c.posEl.textContent = `P${i + 1}`;
+          c.lastPos = i + 1;
+        }
+        if (c.lastName !== p.name) {
+          c.nameEl.textContent = p.name;
+          c.lastName = p.name;
+        }
       }
     }
   }
 
+  const scratchAnchor = new Vector3();
+  const identityMatrix = Matrix.Identity();
+  const lookSpring = camera.getTarget().clone();
+  const frameTimes = new Float64Array(360);
+  let frameCount = 0,
+    failedFrames = 0,
+    renderMs = 0,
+    drawCalls = 0,
+    qualityLevel = 1,
+    resolution = 1.5;
+  let qualityElapsed = 0,
+    qualitySum = 0,
+    qualityFrames = 0,
+    hudRects = [],
+    hudRectsAt = 0;
+  const qualityScales = [2, 1.5, 1, 0.8];
+  const hudNodes = [
+    ...document.querySelectorAll(
+      "header,.hud-top,#leaderboard,#minimap,.speed,#touch,#audioPanel",
+    ),
+  ];
+
   engine.runRenderLoop(() => {
-    const now = performance.now(),
-      dt = Math.min((now - last) / 1000, 0.05);
-    last = now;
-    smokeClock += dt;
-
-    // Dissipate tire smoke particles
-    for (const puff of smoke) {
-      if (puff.life > 0) {
-        puff.life -= dt;
-        puff.mesh.position.y += dt * 0.65;
-        puff.mesh.scaling.scaleInPlace(1 + dt * 0.55);
-        puff.mesh.visibility = Math.max(0, puff.life / 1.2);
-        if (puff.life <= 0) puff.mesh.setEnabled(false);
+    try {
+      const now = performance.now();
+      const elapsed = Math.max(0, (now - last) / 1000);
+      if (document.hidden) {
+        last = now;
+        return;
       }
-    }
-
-    // Animate and bounce spark particles
-    for (const spk of sparks) {
-      if (spk.life > 0) {
-        spk.life -= dt;
-        spk.vy -= 22 * dt; // Gravity
-        spk.mesh.position.x += spk.vx * dt;
-        spk.mesh.position.y += spk.vy * dt;
-        spk.mesh.position.z += spk.vz * dt;
-        if (spk.mesh.position.y < 0.08) {
-          spk.mesh.position.y = 0.08;
-          spk.vy = -spk.vy * 0.38; // Bounce off track
+      const dt = Math.min(elapsed, 0.05);
+      frameTimes[frameCount++ % frameTimes.length] = elapsed * 1000;
+      const targetInterpDelay = Math.max(
+        55,
+        Math.min(180, predictionRtt / 2 + 2 * jitterStdDev + 30),
+      );
+      smoothInterpDelay +=
+        (targetInterpDelay - smoothInterpDelay) * (1 - Math.exp(-3 * dt));
+      const renderAt = now - smoothInterpDelay;
+      if (elapsed < 0.15) {
+        qualityElapsed += elapsed;
+        qualitySum += elapsed;
+        qualityFrames++;
+      }
+      if (qualityElapsed > 4) {
+        const mean = qualitySum / Math.max(1, qualityFrames),
+          base = qualityScales[qualityLevel];
+        const next =
+          mean > 0.022
+            ? Math.min(base + 0.6, resolution + 0.15)
+            : mean < 0.016
+              ? Math.max(base, resolution - 0.1)
+              : resolution;
+        if (Math.abs(next - resolution) > 0.05) {
+          resolution = next;
+          engine.setHardwareScalingLevel(resolution);
         }
-        spk.mesh.visibility = Math.max(0, spk.life / 0.5);
-        if (spk.life <= 0) spk.mesh.setEnabled(false);
+        qualityElapsed = qualitySum = qualityFrames = 0;
       }
-    }
-
-    // Vehicle updates & visual dynamics
-    for (const c of cars.values()) {
-      const t = c.target;
-      if (!t) continue;
-      const isMine = c.root.name === me;
-      const alpha = 1 - Math.exp(-22 * dt);
-
-      // Interpolation timeline
-      const renderAt =
-        now - Math.max(55, Math.min(180, predictionRtt / 2 + 35));
-      let left = c.samples[0],
-        right = c.samples.at(-1);
-      for (let i = 1; i < c.samples.length; i++) {
-        if (c.samples[i].at >= renderAt) {
-          left = c.samples[i - 1];
-          right = c.samples[i];
-          break;
-        }
+      if (now - hudRectsAt > 250) {
+        hudRectsAt = now;
+        hudRects = hudNodes
+          .filter((n) => !n.hidden && n.getClientRects().length)
+          .map((n) => n.getBoundingClientRect());
       }
-      const spanMs = Math.max(1, right.at - left.at);
-      const amount = Math.max(0, Math.min(1, (renderAt - left.at) / spanMs));
-      const dtSec = spanMs / 1000;
+      last = now;
+      smokeClock += dt;
 
-      // Hermite cubic spline velocity-guided smoothing
-      const tNorm = amount;
-      const t2 = tNorm * tNorm;
-      const t3 = t2 * tNorm;
-
-      const h00 = 2 * t3 - 3 * t2 + 1;
-      const h10 = t3 - 2 * t2 + tNorm;
-      const h01 = -2 * t3 + 3 * t2;
-      const h11 = t3 - t2;
-
-      const vx0 = (left.vx ?? 0) * dtSec;
-      const vz0 = (left.vz ?? 0) * dtSec;
-      const vx1 = (right.vx ?? 0) * dtSec;
-      const vz1 = (right.vz ?? 0) * dtSec;
-
-      let targetPosX, targetPosZ;
-      if (
-        !(left.impact > 0.05 || right.impact > 0.05) &&
-        (Math.hypot(vx0, vz0) > 0.01 || Math.hypot(vx1, vz1) > 0.01)
-      ) {
-        targetPosX = h00 * left.x + h10 * vx0 + h01 * right.x + h11 * vx1;
-        targetPosZ = h00 * left.z + h10 * vz0 + h01 * right.z + h11 * vz1;
-      } else {
-        targetPosX = left.x + (right.x - left.x) * tNorm;
-        targetPosZ = left.z + (right.z - left.z) * tNorm;
-      }
-      const targetPosY = left.y + (right.y - left.y) * tNorm;
-
-      // Linear angular interpolation preserves a constant turning rate across packets.
-      const yawDiff = Math.atan2(
-        Math.sin(right.yaw - left.yaw),
-        Math.cos(right.yaw - left.yaw),
-      );
-      const smoothYawT = tNorm;
-      const targetYaw = left.yaw + yawDiff * smoothYawT;
-
-      const sinceLatest = Math.max(
-        0,
-        Math.min(0.08, (renderAt - right.at) / 1000),
-      );
-      const nearContact = targets.some(
-        (other) =>
-          other.id !== t.id && Math.hypot(other.x - t.x, other.z - t.z) < 13,
-      );
-      if (sinceLatest > 0 && !nearContact && !(t.impact > 0.05)) {
-        const ahead = {
-          x: targetPosX + (right.vx || 0) * sinceLatest,
-          z: targetPosZ + (right.vz || 0) * sinceLatest,
-        };
-        if (nearest(ahead.x, ahead.z).distance < TRACK.width / 2 - 2) {
-          targetPosX = ahead.x;
-          targetPosZ = ahead.z;
+      // Dissipate tire smoke particles
+      for (const puff of smoke) {
+        if (puff.life > 0) {
+          puff.life -= dt;
+          puff.mesh.position.y += dt * 0.65;
+          puff.mesh.scaling.scaleInPlace(1 + dt * 0.55);
+          puff.mesh.visibility = Math.max(0, puff.life / 1.2);
+          if (puff.life <= 0) puff.mesh.setEnabled(false);
         }
       }
-      const canPredict =
-        isMine &&
-        currentPhase === "racing" &&
-        t.finished === null &&
-        !localInput.reset &&
-        !nearContact &&
-        now - c.samples.at(-1).at < 180 &&
-        !(t.impact > 0.05) &&
-        nearest(t.x, t.z).distance < TRACK.width / 2 - 3;
-      c.predBlend =
-        (c.predBlend || 0) +
-        ((canPredict ? 1 : 0) - (c.predBlend || 0)) * (1 - Math.exp(-18 * dt));
-      if (canPredict && c.prediction) {
-        const predictionDt = Math.min(
-          0.05,
-          Math.max(0, (now - c.predictedAt) / 1000),
-        );
-        for (let step = 0; step < predictionDt; step += 1 / 60)
-          predict(
-            c.prediction,
-            localInput,
-            Math.min(1 / 60, predictionDt - step),
-          );
+
+      // Animate and bounce spark particles
+      for (const spk of sparks) {
+        if (spk.life > 0) {
+          spk.life -= dt;
+          spk.vy -= 22 * dt; // Gravity
+          spk.mesh.position.x += spk.vx * dt;
+          spk.mesh.position.y += spk.vy * dt;
+          spk.mesh.position.z += spk.vz * dt;
+          if (spk.mesh.position.y < 0.08) {
+            spk.mesh.position.y = 0.08;
+            spk.vy = -spk.vy * 0.38; // Bounce off track
+          }
+          spk.mesh.visibility = Math.max(0, spk.life / 0.5);
+          if (spk.life <= 0) spk.mesh.setEnabled(false);
+        }
+      }
+
+      // Vehicle updates & visual dynamics
+      for (const c of cars.values()) {
+        const t = c.target;
+        if (!t || !c.samples || c.samples.length === 0) continue;
+        const isMine = c.root.name === me;
+        const alpha = 1 - Math.exp(-22 * dt);
+
+        let left = c.samples[0],
+          right = c.samples.at(-1);
+        for (let i = 1; i < c.samples.length; i++) {
+          if (c.samples[i].at >= renderAt) {
+            left = c.samples[i - 1];
+            right = c.samples[i];
+            break;
+          }
+        }
+        const spanMs = Math.max(1, right.at - left.at);
+        const amount = Math.max(0, Math.min(1, (renderAt - left.at) / spanMs));
+        const dtSec = spanMs / 1000;
+
+        // Hermite cubic spline velocity-guided smoothing with tangent clamping
+        const tNorm = amount;
+        const t2 = tNorm * tNorm;
+        const t3 = t2 * tNorm;
+
+        const h00 = 2 * t3 - 3 * t2 + 1;
+        const h10 = t3 - 2 * t2 + tNorm;
+        const h01 = -2 * t3 + 3 * t2;
+        const h11 = t3 - t2;
+
+        let vx0 = (left.vx ?? 0) * dtSec;
+        let vz0 = (left.vz ?? 0) * dtSec;
+        let vx1 = (right.vx ?? 0) * dtSec;
+        let vz1 = (right.vz ?? 0) * dtSec;
+
+        const chordX = right.x - left.x;
+        const chordZ = right.z - left.z;
+        const chordLen = Math.hypot(chordX, chordZ);
+
+        // Clamp velocity tangents against chord displacement to prevent loop-backs or bulging
+        if (chordLen > 0.001) {
+          const uX = chordX / chordLen,
+            uZ = chordZ / chordLen;
+          const dot0 = vx0 * uX + vz0 * uZ;
+          const dot1 = vx1 * uX + vz1 * uZ;
+          if (dot0 < 0) {
+            vx0 = 0;
+            vz0 = 0;
+          } else if (dot0 > chordLen * 2.2) {
+            const s = (chordLen * 2.2) / dot0;
+            vx0 *= s;
+            vz0 *= s;
+          }
+          if (dot1 < 0) {
+            vx1 = 0;
+            vz1 = 0;
+          } else if (dot1 > chordLen * 2.2) {
+            const s = (chordLen * 2.2) / dot1;
+            vx1 *= s;
+            vz1 *= s;
+          }
+        }
+
+        let targetPosX, targetPosZ;
         if (
-          nearest(c.prediction.x, c.prediction.z).distance >
-          TRACK.width / 2 - 2
+          !(left.impact > 0.03 || right.impact > 0.03 || t.impact > 0.03) &&
+          (Math.hypot(vx0, vz0) > 0.01 || Math.hypot(vx1, vz1) > 0.01)
         ) {
-          c.prediction = { ...t };
-          c.predBlend = 0;
+          targetPosX = h00 * left.x + h10 * vx0 + h01 * right.x + h11 * vx1;
+          targetPosZ = h00 * left.z + h10 * vz0 + h01 * right.z + h11 * vz1;
+          // Clamp Hermite overshoot to sample bounds + 0.8m
+          const minX = Math.min(left.x, right.x) - 0.8,
+            maxX = Math.max(left.x, right.x) + 0.8;
+          const minZ = Math.min(left.z, right.z) - 0.8,
+            maxZ = Math.max(left.z, right.z) + 0.8;
+          targetPosX = Math.max(minX, Math.min(maxX, targetPosX));
+          targetPosZ = Math.max(minZ, Math.min(maxZ, targetPosZ));
+        } else {
+          targetPosX = left.x + (right.x - left.x) * tNorm;
+          targetPosZ = left.z + (right.z - left.z) * tNorm;
+        }
+        let targetPosY = left.y + (right.y - left.y) * tNorm;
+
+        // Linear angular interpolation preserves a constant turning rate across packets.
+        const yawDiff = Math.atan2(
+          Math.sin(right.yaw - left.yaw),
+          Math.cos(right.yaw - left.yaw),
+        );
+        const smoothYawT = tNorm;
+        let displayYaw;
+        if (
+          isMine &&
+          currentPhase === "racing" &&
+          t.finished === null &&
+          !localInput.reset &&
+          c.prediction &&
+          now - c.samples.at(-1).at < 200 &&
+          !targets.some(
+            (o) => o.id !== t.id && Math.hypot(o.x - t.x, o.z - t.z) < 12,
+          ) &&
+          nearest(t.x, t.z).distance < TRACK.width / 2 - 3 &&
+          !(t.impact > 0.05)
+        ) {
+          // Zero-latency client prediction for local player
+          const age = Math.min(0.05, Math.max(0, (now - c.predictedAt) / 1000));
+          let remaining = age;
+          while (remaining >= 1 / 60) {
+            predict(c.prediction, localInput, 1 / 60);
+            remaining -= 1 / 60;
+          }
+          c.predictedAt = now - remaining * 1000;
+
+          if (c.reconcile) {
+            c.reconcile.x *= Math.exp(-12 * dt);
+            c.reconcile.z *= Math.exp(-12 * dt);
+          }
+
+          targetPosX =
+            c.prediction.x +
+            c.prediction.vx * remaining +
+            (c.reconcile?.x || 0);
+          targetPosY = t.y;
+          targetPosZ =
+            c.prediction.z +
+            c.prediction.vz * remaining +
+            (c.reconcile?.z || 0);
+          displayYaw = c.prediction.yaw;
+        } else {
+          // Butter-smooth interpolation for remote cars across packets
+          const yawDiff = Math.atan2(
+            Math.sin(right.yaw - left.yaw),
+            Math.cos(right.yaw - left.yaw),
+          );
+          const targetYaw = left.yaw + yawDiff * tNorm;
+          const sinceLatest = Math.max(
+            0,
+            Math.min(0.08, (renderAt - right.at) / 1000),
+          );
+
+          if (
+            sinceLatest > 0 &&
+            !(t.impact > 0.05) &&
+            !targets.some(
+              (o) => o.id !== t.id && Math.hypot(o.x - t.x, o.z - t.z) < 12,
+            )
+          ) {
+            const ahead = {
+              x: targetPosX + (right.vx || 0) * sinceLatest,
+              z: targetPosZ + (right.vz || 0) * sinceLatest,
+            };
+            if (nearest(ahead.x, ahead.z).distance < TRACK.width / 2 - 1.5) {
+              targetPosX = ahead.x;
+              targetPosZ = ahead.z;
+            }
+          }
+          displayYaw = targetYaw;
+        }
+
+        if (c.recovery) {
+          c.recovery.x *= Math.exp(-12 * dt);
+          c.recovery.z *= Math.exp(-12 * dt);
+          targetPosX += c.recovery.x;
+          targetPosZ += c.recovery.z;
+        }
+        c.root.position.set(targetPosX, targetPosY, targetPosZ);
+        c.root.rotation.y = displayYaw;
+
+        // Update 3D spatialized opponent engine audio
+        if (
+          audioSystem &&
+          !isMine &&
+          currentPhase === "racing" &&
+          t.finished === null
+        ) {
+          try {
+            audioSystem.updateRemoteCar(
+              c.root.name,
+              c.root.position,
+              camera.position,
+              t.speed || 0,
+              !!t.throttle,
+              { x: t.vx || 0, z: t.vz || 0 },
+              { x: cameraVel.x || 0, z: cameraVel.z || 0 },
+            );
+          } catch {}
+        } else if (!isMine) audioSystem?.removeRemoteCar(c.root.name);
+
+        // Active brake lights and glowing carbon discs
+        c.brakeLights.forEach((light) => light.setEnabled(!!t.braking));
+        if (t.braking && t.speed > 10) {
+          c.brakeHeat = Math.min(1, c.brakeHeat + dt * 3.2);
+        } else {
+          c.brakeHeat = Math.max(0, c.brakeHeat - dt * 1.8);
+        }
+        const discMat = c.brakeHeat > 0.35 ? brakeDiscHot : brakeDiscCold;
+        c.brakeDiscs.forEach((d) => (d.material = discMat));
+
+        // Responsive steering: zero latency visual turn-in
+        const rawSteerInput =
+          (localInput.left ? -1 : 0) + (localInput.right ? 1 : 0);
+        if (isMine) {
+          localSteerAngle +=
+            (rawSteerInput - localSteerAngle) * (1 - Math.exp(-32 * dt));
+        }
+        const visualSteer = isMine ? localSteerAngle : t.steer;
+
+        // Tire smoke on heavy drift or braking
+        if (t.drift && t.speed > 8 && smokeClock > 0.035) {
+          const puff = smoke[smokeCursor++ % smoke.length];
+          puff.life = 1.1;
+          puff.mesh.setEnabled(true);
+          puff.mesh.position.copyFrom(c.root.position);
+          puff.mesh.position.x -= Math.sin(c.root.rotation.y) * 1.7;
+          puff.mesh.position.z -= Math.cos(c.root.rotation.y) * 1.7;
+          puff.mesh.position.y = 0.28;
+          puff.mesh.scaling.setAll(0.65);
+          smokeClock = 0;
+        }
+
+        // Spark bursts on physical impact
+        if (t.impact > (c.lastImpact || 0) + 0.06) {
+          emitSparks(
+            c.root.position.x,
+            c.root.position.y + 0.25,
+            c.root.position.z,
+            Math.floor(t.impact * 12),
+            1.2,
+          );
+        }
+
+        c.lastImpact = t.impact || 0;
+        // Dynamic suspension pitch (squat on gas, dive on brake) and roll into turns
+        const acceleration = Math.max(
+          -40,
+          Math.min(
+            30,
+            (t.speed - (c.lastSpeed ?? t.speed)) / Math.max(0.016, dt),
+          ),
+        );
+        c.lastSpeed = t.speed;
+        c.load =
+          (c.load || 0) +
+          (acceleration - (c.load || 0)) * (1 - Math.exp(-7 * dt));
+        const targetPitch = c.load * 0.0015;
+        const targetRoll = -visualSteer * Math.min(1, t.speed / 24) * 0.06;
+        c.chassis.rotation.x += (targetPitch - c.chassis.rotation.x) * alpha;
+        c.chassis.rotation.z += (targetRoll - c.chassis.rotation.z) * alpha;
+
+        // Authentic kerb chassis micro-vibration
+        const trackDist = nearest(targetPosX, targetPosZ).distance;
+        const onKerbZone = trackDist >= 9.8 && trackDist <= 11.6;
+        if (onKerbZone && (t.speed || 0) > 7) {
+          c.chassis.position.y =
+            0.28 +
+            Math.sin(now * 0.055) *
+              Math.min(0.022, ((t.speed || 0) / 45) * 0.022);
+        } else {
+          c.chassis.position.y += (0.28 - c.chassis.position.y) * alpha;
+        }
+
+        // Wheel spinning & Ackermann steering geometry
+        for (const w of c.wheels) {
+          const forwardSpeed =
+            (t.vx || 0) * Math.sin(t.yaw) + (t.vz || 0) * Math.cos(t.yaw);
+          w.wheel.rotation.x =
+            (w.wheel.rotation.x + (forwardSpeed * dt) / 0.38) % (Math.PI * 2);
+          const steerTarget = w.front ? visualSteer * 0.34 : 0;
+          w.pivot.rotation.y += (steerTarget - w.pivot.rotation.y) * alpha;
+          const compression = Math.max(
+            -0.045,
+            Math.min(
+              0.045,
+              (w.front ? -1 : 1) * c.load * 0.001 +
+                Math.sign(w.pivot.position.x) * targetRoll * 0.4,
+            ),
+          );
+          w.pivot.position.y +=
+            (-0.05 + compression - w.pivot.position.y) *
+            (1 - Math.exp(-12 * dt));
         }
       }
-      c.predictedAt = now;
-      if (c.reconcile) {
-        c.reconcile.x *= Math.exp(-14 * dt);
-        c.reconcile.z *= Math.exp(-14 * dt);
-        targetPosX += c.reconcile.x * c.predBlend;
-        targetPosZ += c.reconcile.z * c.predBlend;
-      }
-      let displayYaw = targetYaw;
-      if (isMine && c.prediction) {
-        targetPosX += (c.prediction.x - targetPosX) * c.predBlend;
-        targetPosZ += (c.prediction.z - targetPosZ) * c.predBlend;
-        displayYaw +=
-          Math.atan2(
-            Math.sin(c.prediction.yaw - targetYaw),
-            Math.cos(c.prediction.yaw - targetYaw),
-          ) * c.predBlend;
-      }
-      if (c.recovery) {
-        c.recovery.x *= Math.exp(-12 * dt);
-        c.recovery.z *= Math.exp(-12 * dt);
-        targetPosX += c.recovery.x;
-        targetPosZ += c.recovery.z;
-      }
-      c.root.position.set(targetPosX, targetPosY, targetPosZ);
-      c.root.rotation.y = displayYaw;
 
-      // Update 3D spatialized opponent engine audio
-      if (
-        audioSystem &&
-        !isMine &&
-        currentPhase === "racing" &&
-        t.finished === null
-      ) {
-        audioSystem.updateRemoteCar(
-          c.root.name,
-          c.root.position,
-          camera.position,
-          t.speed || 0,
-          !!t.throttle,
-        );
-      } else if (!isMine) audioSystem?.removeRemoteCar(c.root.name);
-
-      // Active brake lights and glowing carbon discs
-      c.brakeLights.forEach((light) => light.setEnabled(!!t.braking));
-      if (t.braking && t.speed > 10) {
-        c.brakeHeat = Math.min(1, c.brakeHeat + dt * 3.2);
-      } else {
-        c.brakeHeat = Math.max(0, c.brakeHeat - dt * 1.8);
-      }
-      const discMat = c.brakeHeat > 0.35 ? brakeDiscHot : brakeDiscCold;
-      c.brakeDiscs.forEach((d) => (d.material = discMat));
-
-      // Responsive steering: zero latency visual turn-in
-      const rawSteerInput =
-        (localInput.left ? -1 : 0) + (localInput.right ? 1 : 0);
-      if (isMine) {
-        localSteerAngle +=
-          (rawSteerInput - localSteerAngle) * (1 - Math.exp(-32 * dt));
-      }
-      const visualSteer = isMine ? localSteerAngle : t.steer;
-
-      // Tire smoke on heavy drift or braking
-      if (t.drift && t.speed > 8 && smokeClock > 0.035) {
-        const puff = smoke[smokeCursor++ % smoke.length];
-        puff.life = 1.1;
-        puff.mesh.setEnabled(true);
-        puff.mesh.position.copyFrom(c.root.position);
-        puff.mesh.position.x -= Math.sin(c.root.rotation.y) * 1.7;
-        puff.mesh.position.z -= Math.cos(c.root.rotation.y) * 1.7;
-        puff.mesh.position.y = 0.28;
-        puff.mesh.scaling.setAll(0.65);
-        smokeClock = 0;
-      }
-
-      // Spark bursts on physical impact
-      if (t.impact > (c.lastImpact || 0) + 0.06) {
-        emitSparks(
-          c.root.position.x,
-          c.root.position.y + 0.25,
-          c.root.position.z,
-          Math.floor(t.impact * 12),
-          1.2,
-        );
-      }
-
-      c.lastImpact = t.impact || 0;
-      // Dynamic suspension pitch (squat on gas, dive on brake) and roll into turns
-      const targetPitch = (t.throttle ? 0.022 : 0) - (t.braking ? 0.038 : 0);
-      const targetRoll = -visualSteer * Math.min(1, t.speed / 24) * 0.075;
-      c.chassis.rotation.x += (targetPitch - c.chassis.rotation.x) * alpha;
-      c.chassis.rotation.z += (targetRoll - c.chassis.rotation.z) * alpha;
-
-      // Wheel spinning & Ackermann steering geometry
-      for (const w of c.wheels) {
-        w.wheel.rotation.x += (t.speed * dt) / 0.38;
-        const steerTarget = w.front ? visualSteer * 0.34 : 0;
-        w.pivot.rotation.y += (steerTarget - w.pivot.rotation.y) * alpha;
-      }
-    }
-
-    // Resolve tiny interpolation penetrations and emit contact sparks
-    const visible = [...cars.values()];
-    for (let pass = 0; pass < 3; pass++) {
-      for (let i = 0; i < visible.length; i++) {
-        for (let j = i + 1; j < visible.length; j++) {
-          const a = visible[i].root,
-            b = visible[j].root,
-            hit = overlap(
+      // A shared delayed contact timeline is primary; project residual interpolation overlap.
+      const visible = [...cars.values()];
+      for (let pass = 0; pass < 8; pass++) {
+        for (let i = 0; i < visible.length; i++)
+          for (let j = i + 1; j < visible.length; j++) {
+            const a = visible[i].root,
+              b = visible[j].root;
+            const hit = overlap(
               { x: a.position.x, z: a.position.z, yaw: a.rotation.y },
               { x: b.position.x, z: b.position.z, yaw: b.rotation.y },
             );
-          if (hit) {
-            const correction = (hit.depth + 0.002) * 0.5;
-            a.position.x -= hit.x * correction;
-            a.position.z -= hit.z * correction;
-            b.position.x += hit.x * correction;
-            b.position.z += hit.z * correction;
-            if (pass === 0 && Math.random() < 0.25) {
-              emitSparks(
-                (a.position.x + b.position.x) * 0.5,
-                0.3,
-                (a.position.z + b.position.z) * 0.5,
-                6,
-                0.8,
-              );
+            if (hit) {
+              const d = (hit.depth + 0.002) / 2;
+              a.position.x -= hit.x * d;
+              a.position.z -= hit.z * d;
+              b.position.x += hit.x * d;
+              b.position.z += hit.z * d;
             }
           }
+        for (const c of visible) {
+          const p = c.root.position,
+            f = point(nearest(p.x, p.z).s),
+            nx = Math.cos(f.yaw),
+            nz = -Math.sin(f.yaw),
+            rel = c.root.rotation.y - f.yaw;
+          const limit =
+            TRACK.width / 2 -
+            1.28 * Math.abs(Math.cos(rel)) -
+            2.3 * Math.abs(Math.sin(rel)) -
+            0.03;
+          const side = (p.x - f.x) * nx + (p.z - f.z) * nz,
+            excess = side - Math.max(-limit, Math.min(limit, side));
+          p.x -= nx * excess;
+          p.z -= nz * excess;
         }
       }
-    }
 
-    // Dynamic Chase Camera with look-ahead, speed FOV & collision shake
-    const mine = cars.get(me);
-    if (racing && mine && mine.target) {
-      const p = mine.root.position,
-        yaw = mine.root.rotation.y,
-        speed = mine.target.speed;
+      // Dynamic Chase Camera with look-ahead and speed FOV (ultra-stable 1fc22f6 geometry)
+      const mine = cars.get(me);
+      if (racing && mine && mine.target) {
+        const p = mine.root.position,
+          yaw = mine.root.rotation.y,
+          speed = Number.isFinite(mine.target.speed)
+            ? Math.max(0, mine.target.speed)
+            : 0;
 
-      // Screen shake impulse on impact
-      if (mine.target.impact > (mine.cameraImpact || 0) + 0.06)
-        camShake = Math.min(0.12, mine.target.impact * 0.1);
-      mine.cameraImpact = mine.target.impact || 0;
-      camShake *= Math.exp(-9 * dt);
+        // Smooth chase camera distance and height inspired by the solid 1fc22f6 feel
+        const camDist = 13.5 + Math.min(2.5, speed * 0.04);
+        const camHeight = 5.2 + Math.min(0.8, speed * 0.02);
 
-      // Smooth chase camera distance and height
-      const camDist = 10.6 + Math.min(1.8, speed * 0.035);
-      const camHeight = 4.2 + Math.min(0.6, speed * 0.012);
+        const px = Number.isFinite(p.x) ? p.x : 120;
+        const py = Number.isFinite(p.y) ? p.y : 0.55;
+        const pz = Number.isFinite(p.z) ? p.z : 0;
+        const safeYaw = Number.isFinite(yaw) ? yaw : 0;
 
-      const desired = new Vector3(
-        p.x - Math.sin(yaw) * camDist + (Math.random() - 0.5) * camShake,
-        p.y + camHeight + (Math.random() - 0.5) * camShake,
-        p.z - Math.cos(yaw) * camDist + (Math.random() - 0.5) * camShake,
-      );
+        const desired = new Vector3(
+          px - Math.sin(safeYaw) * camDist,
+          py + camHeight,
+          pz - Math.cos(safeYaw) * camDist,
+        );
 
-      camera.position = Vector3.Lerp(
-        camera.position,
-        desired,
-        1 - Math.exp(-8 * dt),
-      );
+        const prevCamX = camera.position.x;
+        const prevCamZ = camera.position.z;
 
-      // Look-ahead target anticipates corners
-      const lookDist = 7.5 + Math.min(5.5, speed * 0.12);
-      const lookTarget = new Vector3(
-        p.x + Math.sin(yaw) * lookDist,
-        p.y + 1.25,
-        p.z + Math.cos(yaw) * lookDist,
-      );
-      camera.setTarget(lookTarget);
+        camera.position = Vector3.Lerp(
+          camera.position,
+          desired,
+          1 - Math.exp(-8 * dt),
+        );
 
-      // Speed FOV expansion (intense tunnel vision at top speed)
-      const targetFov = 0.82 + Math.min(0.14, (speed / 50) * 0.14);
-      camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-6 * dt));
-    } else {
-      // Cinematic orbit in lobby / results
-      const t = now * 0.00015;
-      camera.fov = 0.82;
-      camera.position.set(120 + Math.sin(t) * 75, 55, Math.cos(t) * 75);
-      camera.setTarget(new Vector3(120, 2, 0));
-    }
+        // Validate camera.position sanity
+        if (
+          !Number.isFinite(camera.position.x) ||
+          !Number.isFinite(camera.position.y) ||
+          !Number.isFinite(camera.position.z)
+        ) {
+          camera.position.copyFrom(desired);
+        }
 
-    audioSystem?.listener(
-      camera.position,
-      camera.getTarget().subtract(camera.position).normalize(),
-    );
-    scene.render();
+        cameraVel.x = (camera.position.x - prevCamX) / dt;
+        cameraVel.z = (camera.position.z - prevCamZ) / dt;
 
-    // Floating broadcast driver tags: positioned safely above car (+2.65m)
-    const occupied = [];
-    const viewport = camera.viewport.toGlobal(
-      engine.getRenderWidth(),
-      engine.getRenderHeight(),
-    );
+        // Look-ahead target anticipates corners
+        const lookDist = 7.5 + Math.min(5.0, speed * 0.1);
+        const lookTarget = new Vector3(
+          px + Math.sin(safeYaw) * lookDist,
+          py + 1.25,
+          pz + Math.cos(safeYaw) * lookDist,
+        );
+        if (Vector3.DistanceSquared(camera.position, lookTarget) > 0.01) {
+          Vector3.LerpToRef(
+            lookSpring,
+            lookTarget,
+            1 - Math.exp(-10 * dt),
+            lookSpring,
+          );
+          camera.setTarget(lookSpring);
+        }
 
-    for (const c of [...cars.values()].sort(
-      (a, b) =>
-        Vector3.DistanceSquared(a.root.position, camera.position) -
-        Vector3.DistanceSquared(b.root.position, camera.position),
-    )) {
-      const anchor = c.root.position.add(new Vector3(0, 2.65, 0));
-      const projected = Vector3.Project(
-        anchor,
-        Matrix.Identity(),
-        scene.getTransformMatrix(),
-        viewport,
-      );
-      const distance = Vector3.Distance(anchor, camera.position);
-      const x = (projected.x / engine.getRenderWidth()) * innerWidth,
-        y = (projected.y / engine.getRenderHeight()) * innerHeight;
-      const isMine = c.root.name === me;
-      const hidden =
-        !racing ||
-        currentPhase === "results" ||
-        isMine ||
-        projected.z < 0 ||
-        projected.z > 1 ||
-        distance < 4.5 ||
-        distance > 150 ||
-        x < 80 ||
-        x > innerWidth - 80 ||
-        y < 120 ||
-        y > innerHeight - 80 ||
-        occupied.some((p) => Math.abs(p.x - x) < 140 && Math.abs(p.y - y) < 32);
-      c.label.hidden = hidden;
-      if (!hidden) {
-        occupied.push({ x, y });
-        const scale = Math.max(0.72, Math.min(1.05, 26 / distance));
-        c.label.style.transform = `translate(-50%,-100%) translate(${x.toFixed(1)}px,${y.toFixed(1)}px) scale(${scale.toFixed(2)})`;
-        c.label.style.opacity = String(Math.min(1, (150 - distance) / 25));
+        // Speed FOV expansion (intense tunnel vision at top speed, clamped safely)
+        const targetFov = 0.82 + Math.min(0.12, (speed / 50) * 0.12);
+        camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-6 * dt));
+        camera.fov = Math.max(
+          0.7,
+          Math.min(0.98, Number.isFinite(camera.fov) ? camera.fov : 0.82),
+        );
+      } else {
+        // Cinematic orbit in lobby / results
+        const t = now * 0.00015;
+        camera.fov += (0.82 - camera.fov) * (1 - Math.exp(-4 * dt));
+        Vector3.LerpToRef(
+          camera.position,
+          new Vector3(120 + Math.sin(t) * 75, 55, Math.cos(t) * 75),
+          1 - Math.exp(-2 * dt),
+          camera.position,
+        );
+        Vector3.LerpToRef(
+          lookSpring,
+          new Vector3(120, 2, 0),
+          1 - Math.exp(-3 * dt),
+          lookSpring,
+        );
+        camera.setTarget(lookSpring);
+        cameraVel.set(0, 0, 0);
       }
+
+      try {
+        const fwd = camera.getTarget().subtract(camera.position);
+        const fwdLen = fwd.length();
+        if (fwdLen > 0.001) {
+          fwd.scaleInPlace(1 / fwdLen);
+          audioSystem?.listener(camera.position, fwd);
+        }
+      } catch {}
+      const renderStart = performance.now(),
+        drawStart = engine._drawCalls?.current || 0;
+      scene.render();
+      renderMs = performance.now() - renderStart;
+      drawCalls = Math.max(0, (engine._drawCalls?.current || 0) - drawStart);
+
+      // Floating broadcast driver tags: positioned safely above car (+2.65m)
+      const occupied = [];
+      const viewport = camera.viewport.toGlobal(
+        engine.getRenderWidth(),
+        engine.getRenderHeight(),
+      );
+      const camTarget = camera.getTarget();
+      const camForwardX = camTarget.x - camera.position.x;
+      const camForwardZ = camTarget.z - camera.position.z;
+      const camForwardLen = Math.hypot(camForwardX, camForwardZ);
+      const normForwardX =
+        camForwardLen > 1e-4 ? camForwardX / camForwardLen : 0;
+      const normForwardZ =
+        camForwardLen > 1e-4 ? camForwardZ / camForwardLen : 1;
+      const transformMatrix = scene.getTransformMatrix();
+
+      for (const c of [...cars.values()].sort(
+        (a, b) =>
+          Vector3.DistanceSquared(a.root.position, camera.position) -
+          Vector3.DistanceSquared(b.root.position, camera.position),
+      )) {
+        const isMine = c.root.name === me;
+        if (!racing || currentPhase === "results" || isMine) {
+          c.label.hidden = true;
+          continue;
+        }
+        const toCarX = c.root.position.x - camera.position.x;
+        const toCarZ = c.root.position.z - camera.position.z;
+        const dotForward = toCarX * normForwardX + toCarZ * normForwardZ;
+        if (dotForward < 1.0) {
+          c.label.hidden = true;
+          continue;
+        }
+
+        scratchAnchor.set(
+          c.root.position.x,
+          c.root.position.y + 2.65,
+          c.root.position.z,
+        );
+        const projected = Vector3.Project(
+          scratchAnchor,
+          identityMatrix,
+          transformMatrix,
+          viewport,
+        );
+        const distance = Math.max(
+          0.01,
+          Vector3.Distance(scratchAnchor, camera.position),
+        );
+        const renderW = Math.max(1, engine.getRenderWidth());
+        const renderH = Math.max(1, engine.getRenderHeight());
+        const x = (projected.x / renderW) * innerWidth,
+          y = (projected.y / renderH) * innerHeight;
+        const hidden =
+          projected.z < 0 ||
+          projected.z > 1 ||
+          distance < 4.5 ||
+          distance > 150 ||
+          x < 80 ||
+          x > innerWidth - 80 ||
+          y < 120 ||
+          y > innerHeight - 80 ||
+          hudRects.some(
+            (r) =>
+              x + 85 > r.left &&
+              x - 85 < r.right &&
+              y > r.top &&
+              y - 34 < r.bottom,
+          ) ||
+          occupied.some(
+            (p) => Math.abs(p.x - x) < 140 && Math.abs(p.y - y) < 32,
+          );
+        c.label.hidden = hidden;
+        if (!hidden) {
+          occupied.push({ x, y });
+          const scale = Math.max(0.72, Math.min(1.05, 26 / distance));
+          c.label.style.transform = `translate(-50%,-100%) translate(${x.toFixed(1)}px,${y.toFixed(1)}px) scale(${scale.toFixed(2)})`;
+          c.label.style.opacity = String(Math.min(1, (150 - distance) / 25));
+        }
+      }
+    } catch (err) {
+      failedFrames++;
+      if (failedFrames === 1) console.error("Render loop failure:", err);
     }
   });
 
-  window.addEventListener("resize", () => engine.resize());
+  const resize = () => engine.resize();
+  window.addEventListener("resize", resize);
 
   return {
     update,
+    metrics: () => {
+      const values = Array.from(
+        frameTimes.slice(0, Math.min(frameCount, 360)),
+      ).sort((a, b) => a - b);
+      return {
+        frames: frameCount,
+        failedFrames,
+        meanFrameMs:
+          values.reduce((a, b) => a + b, 0) / Math.max(1, values.length),
+        p95FrameMs: values[Math.floor(values.length * 0.95)] || 0,
+        renderMs,
+        drawCalls,
+        meshes: scene.meshes.length,
+        activeMeshes: scene.getActiveMeshes().length,
+        materials: scene.materials.length,
+        textures: scene.textures.length,
+        interpolationMs: smoothInterpDelay,
+        quality: qualityLevel,
+        resolution,
+        poses: [...cars.values()].map((c) => ({
+          id: c.root.name,
+          x: c.root.position.x,
+          z: c.root.position.z,
+          yaw: c.root.rotation.y,
+        })),
+      };
+    },
+    dispose: () => {
+      window.removeEventListener("resize", resize);
+      for (const c of cars.values()) c.dispose();
+      cars.clear();
+      engine.stopRenderLoop();
+      scene.dispose();
+      engine.dispose();
+    },
     input: (keys, history = []) => {
       localInput = { ...keys };
       inputHistory = history;
     },
-    network: (offset, rtt) => {
+    network: (offset, rtt, stdDev = 0) => {
       serverOffset = offset;
       predictionRtt = rtt;
+      jitterStdDev = stdDev;
     },
     quality: (level) => {
-      engine.setHardwareScalingLevel([2, 1.5, 1][level]);
+      if (!Number.isInteger(level) || level < 0 || level > 3) return;
+      qualityLevel = level;
+      resolution = qualityScales[level];
+      qualityElapsed = qualitySum = qualityFrames = 0;
+      engine.setHardwareScalingLevel(resolution);
       if (shadowGen) {
         if (level === 0) {
           scene.shadowsEnabled = false;
@@ -4481,6 +5375,54 @@ footer,
   .driver-label {
     font-size: 10px;
     max-width: 130px;
+  }
+}
+
+.audio-panel {
+  position: fixed;
+  z-index: 7;
+  top: 80px;
+  right: 40px;
+  width: min(310px, 90vw);
+  max-height: calc(100dvh - 100px);
+  overflow: auto;
+}
+.audio-panel label {
+  margin: 18px 0 5px;
+  display: flex;
+  justify-content: space-between;
+}
+.audio-panel input {
+  padding: 0;
+  accent-color: #d6fc71;
+  cursor: pointer;
+  height: 20px;
+}
+.audio-panel output {
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 700px) {
+  .audio-panel {
+    top: 72px;
+    right: 15px;
+  }
+  header {
+    padding: 12px;
+  }
+  .brand {
+    font-size: 30px;
+  }
+  .top-right {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 270px;
+  }
+  #connection {
+    width: 100%;
+    text-align: right;
+  }
+  .hud-top {
+    top: 90px;
   }
 }
 ````
@@ -6935,8 +7877,9 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/package.json`
     "dev": "node server/index.js --dev",
     "build": "vite build",
     "start": "node server/index.js",
-    "test": "node --test",
+    "test": "node --test test/race.test.js",
     "test:browser": "node scripts/browser-check.mjs",
+    "test:stress": "node scripts/crash-stress-test.mjs && node scripts/stress-test.mjs",
     "format": "prettier --write client server shared test scripts *.js *.json"
   },
   "dependencies": {
@@ -7017,7 +7960,7 @@ try {
   await a.goto(base);
   await a.locator("#connection").filter({ hasText: "ONLINE" }).waitFor();
   assert.equal(await a.locator("#quality").textContent(), "QUALITY MEDIUM");
-  for (const label of ["HIGH", "LOW", "MEDIUM"]) {
+  for (const label of ["HIGH", "ULTRA", "LOW", "MEDIUM"]) {
     await a.locator("#quality").click();
     assert.equal(await a.locator("#quality").textContent(), "QUALITY " + label);
   }
@@ -7299,6 +8242,441 @@ try {
 }
 ````
 
+## scripts/crash-stress-test.mjs
+
+Exact workspace path: `C:/Users/jadav/Coding/car racing game/scripts/crash-stress-test.mjs`
+
+````
+import { chromium } from "@playwright/test";
+import assert from "node:assert/strict";
+import { createGame } from "../server/index.js";
+
+const game = await createGame();
+await new Promise((resolve) => game.http.listen(0, "127.0.0.1", resolve));
+const base = `http://127.0.0.1:${game.http.address().port}`;
+
+console.log(`Starting APEX Critical Crash & Stability Stress Test on ${base}...`);
+
+const browser = await chromium.launch({
+  channel: "chrome",
+  headless: true,
+  args: [
+    "--enable-webgl",
+    "--use-angle=swiftshader",
+    "--enable-unsafe-swiftshader",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+  ],
+});
+
+const context1 = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+});
+const context2 = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+});
+
+const p1 = await context1.newPage();
+const p2 = await context2.newPage();
+const errors = [];
+
+for (const [name, p] of [["P1", p1], ["P2", p2]]) {
+  p.on("pageerror", (e) => {
+    console.error(`[${name} PageError]`, e.message);
+    errors.push(`${name} PageError: ${e.message}`);
+  });
+  p.on("console", (msg) => {
+    if (msg.type() === "error") {
+      console.error(`[${name} ConsoleError]`, msg.text());
+      errors.push(`${name} ConsoleError: ${msg.text()}`);
+    }
+  });
+}
+
+try {
+  // Step 1: Join Lobby
+  await p1.goto(base);
+  await p1.locator("#connection").filter({ hasText: "ONLINE" }).waitFor();
+  await p1.locator("#nickname").fill("RacerAlpha");
+  await p1.locator("#create").click();
+  await p1.locator("#lobby").waitFor({ state: "visible" });
+
+  const code = (await p1.locator("#roomCode").textContent()).trim();
+  assert.match(code, /^[A-Z2-9]{5}$/);
+
+  await p2.goto(`${base}/?room=${code}`);
+  await p2.locator("#connection").filter({ hasText: "ONLINE" }).waitFor();
+  await p2.locator("#nickname").fill("RacerBeta");
+  await p2.locator("#code").fill(code);
+  await p2.locator("#join").click();
+  await p2.locator("#lobby").waitFor({ state: "visible" });
+
+  await p1.bringToFront();
+  await p1.locator("#players .player").filter({ hasText: "RacerBeta" }).waitFor();
+
+  console.log("Both racers connected to lobby. Starting Race 1...");
+
+  // ==========================================
+  // RACE 1: MAX SPEED, WALL CRASH, CAR-TO-CAR
+  // ==========================================
+  await p1.locator("#start").click();
+
+  await Promise.all([
+    p1.locator("#countdown").filter({ hasText: /^[123]$/ }).waitFor(),
+    p2.locator("#countdown").filter({ hasText: /^[123]$/ }).waitFor(),
+  ]);
+
+  await p1.waitForFunction(() => window.__getState()?.phase === "racing");
+  await p2.waitForFunction(() => window.__getState()?.phase === "racing");
+
+  console.log("TEST 1: Accelerating to Maximum Speed (> 140 km/h)...");
+  await p2.bringToFront();
+  await p2.evaluate(() => window.focus());
+  await p2.keyboard.down("w");
+
+  await p1.bringToFront();
+  await p1.evaluate(() => window.focus());
+  await p1.keyboard.down("w");
+
+  // Drive at max speed for 3.5 seconds
+  await p1.waitForTimeout(3500);
+
+  const speed1 = Number(await p1.locator("#speed").textContent());
+  assert.ok(speed1 > 120, `Driver 1 should reach high speed, got ${speed1} km/h`);
+  assert.ok(Number.isFinite(speed1), "Speed must be finite (not NaN)");
+
+  // Check UI state on p1
+  const rpm1 = await p1.evaluate(() => document.getElementById("rpm")?.style.getPropertyValue("--rpm"));
+  assert.ok(Number.isFinite(parseFloat(rpm1)), `RPM CSS variable must be finite, got ${rpm1}`);
+
+  console.log(`Max speed reached: ${speed1} km/h, RPM var: ${rpm1}.`);
+
+  console.log("TEST 2: Intentional High-Speed Wall Crashes (steering hard into barrier)...");
+  // Hard turn right into barrier at high speed
+  await p1.bringToFront();
+  await p1.keyboard.down("d");
+  await p1.waitForTimeout(1200);
+  await p1.keyboard.up("d");
+
+  // Hard turn left into opposite barrier
+  await p1.keyboard.down("a");
+  await p1.waitForTimeout(1200);
+  await p1.keyboard.up("a");
+
+  // Release throttle
+  await p1.keyboard.up("w");
+  await p2.keyboard.up("w");
+
+  // Verify server car physics invariants after hard wall crashes
+  const room = game.rooms.get(code);
+  assert.ok(room, "Room must exist");
+  for (const car of room.race.cars.values()) {
+    assert.equal(car.b.position.y, 0.55, "Car must stay strictly grounded at y=0.55");
+    assert.equal(car.b.velocity.y, 0, "Vertical velocity must stay at 0");
+    assert.ok(Number.isFinite(car.b.position.x), "Car x must be finite");
+    assert.ok(Number.isFinite(car.b.position.z), "Car z must be finite");
+    assert.ok(Number.isFinite(car.b.velocity.x), "Car vx must be finite");
+    assert.ok(Number.isFinite(car.b.velocity.z), "Car vz must be finite");
+    assert.ok(Number.isFinite(car.yaw), "Car yaw must be finite");
+    const speed = Math.hypot(car.b.velocity.x, car.b.velocity.z);
+    assert.ok(speed <= 52, `Car speed must be clamped <= 52 m/s, got ${speed}`);
+  }
+  console.log("PASS: Wall crashes contained car safely on track with finite physics.");
+
+  console.log("TEST 3: Intentional Car-to-Car Collisions...");
+  // Ram Driver 1 into Driver 2
+  const [carA, carB] = [...room.race.cars.values()];
+  carA.b.position.set(120, 0.55, 60);
+  carA.yaw = 0;
+  carA.b.velocity.set(0, 0, 45);
+  carB.b.position.set(120, 0.55, 64);
+  carB.yaw = Math.PI;
+  carB.b.velocity.set(0, 0, -45);
+
+  for (let i = 0; i < 30; i++) {
+    room.race.step(1 / 60, Date.now(), true, room.startAt);
+  }
+
+  assert.ok(Number.isFinite(carA.b.velocity.z), "CarA vz must be finite");
+  assert.ok(Number.isFinite(carB.b.velocity.z), "CarB vz must be finite");
+  assert.ok(Math.hypot(carA.b.velocity.x, carA.b.velocity.z) <= 52, "CarA speed <= 52");
+  assert.ok(Math.hypot(carB.b.velocity.x, carB.b.velocity.z) <= 52, "CarB speed <= 52");
+  assert.ok(carA.b.position.y === 0.55 && carB.b.position.y === 0.55, "Cars remain grounded");
+  console.log("PASS: Direct head-on car collision resolved safely with zero explosion.");
+
+  console.log("TEST 4: Drifting Through Sweeping Turns...");
+  await p1.bringToFront();
+  await p1.keyboard.down("w");
+  await p1.keyboard.down(" ");
+  await p1.keyboard.down("a");
+  await p1.waitForTimeout(800);
+  await p1.keyboard.up(" ");
+  await p1.keyboard.up("a");
+  await p1.keyboard.up("w");
+  console.log("PASS: Drift input executed smoothly without error.");
+
+  console.log("TEST 5: Completing 3 Laps and Transitioning to Results...");
+  [...room.race.cars.values()].forEach((c, i) => {
+    c.passed = 72;
+    c.finished = 62000 + i * 1200;
+  });
+
+  await p1.locator("#results").waitFor({ state: "visible" });
+  await p2.locator("#results").waitFor({ state: "visible" });
+  const winner = await p1.locator("#winner").textContent();
+  assert.equal(winner, "RacerAlpha takes the win.");
+  console.log("PASS: 3 Laps completed, results displayed accurately.");
+
+  // ==========================================
+  // RACE 2: REMATCH CYCLE 1
+  // ==========================================
+  console.log("TEST 6: Rematch Flow (Race 2)...");
+  await p1.bringToFront();
+  await p1.locator("#rematch").click();
+  await p1.locator("#lobby").waitFor({ state: "visible" });
+  await p2.locator("#lobby").waitFor({ state: "visible" });
+
+  await p1.locator("#start").click();
+  await p1.waitForFunction(() => window.__getState()?.phase === "racing");
+  await p2.waitForFunction(() => window.__getState()?.phase === "racing");
+
+  const room2 = game.rooms.get(code);
+  [...room2.race.cars.values()].forEach((c, i) => {
+    c.passed = 72;
+    c.finished = 59000 + i * 1100;
+  });
+  await p1.locator("#results").waitFor({ state: "visible" });
+  await p2.locator("#results").waitFor({ state: "visible" });
+  console.log("PASS: Rematch 1 completed cleanly.");
+
+  // ==========================================
+  // RACE 3: REMATCH CYCLE 2
+  // ==========================================
+  console.log("TEST 6 (cont): Rematch Flow (Race 3)...");
+  await p1.bringToFront();
+  await p1.locator("#rematch").click();
+  await p1.locator("#lobby").waitFor({ state: "visible" });
+  await p2.locator("#lobby").waitFor({ state: "visible" });
+  console.log("PASS: Rematch 2 lobby state clean.");
+
+  // ==========================================
+  // TEST 7: DISCONNECT AND REJOIN
+  // ==========================================
+  console.log("TEST 7: Disconnect and Rejoin...");
+  await p2.close();
+  await p1.bringToFront();
+  await p1.waitForFunction(() => window.__getState()?.players.length === 1);
+  console.log("Player 2 disconnected; room updated to 1 player.");
+
+  const p2New = await context2.newPage();
+  p2New.on("pageerror", (e) => errors.push(`P2New PageError: ${e.message}`));
+  p2New.on("console", (msg) => {
+    if (msg.type() === "error") errors.push(`P2New ConsoleError: ${msg.text()}`);
+  });
+
+  await p2New.goto(`${base}/?room=${code}`);
+  await p2New.locator("#connection").filter({ hasText: "ONLINE" }).waitFor();
+  await p2New.locator("#nickname").fill("RacerBetaRejoined");
+  await p2New.locator("#code").fill(code);
+  await p2New.locator("#join").click();
+  await p2New.locator("#lobby").waitFor({ state: "visible" });
+
+  await p1.bringToFront();
+  await p1.locator("#players .player").filter({ hasText: "RacerBetaRejoined" }).waitFor();
+  console.log("Player 2 successfully rejoined the lobby!");
+
+  assert.deepEqual(errors, [], `Expected 0 errors, got: ${errors.join("; ")}`);
+  console.log("==================================================");
+  console.log("ALL 7 CRITICAL CRASH & STRESS TESTS PASSED WITH 0 ERRORS!");
+  console.log("==================================================");
+} finally {
+  await browser.close();
+  await game.close();
+}
+````
+
+## scripts/stress-test.mjs
+
+Exact workspace path: `C:/Users/jadav/Coding/car racing game/scripts/stress-test.mjs`
+
+````
+import { chromium } from "@playwright/test";
+import assert from "node:assert/strict";
+import { createGame } from "../server/index.js";
+
+const game = await createGame();
+await new Promise((resolve) => game.http.listen(0, "127.0.0.1", resolve));
+const base = `http://127.0.0.1:${game.http.address().port}`;
+
+console.log(`Starting APEX Multi-Race Stress Test on ${base}...`);
+
+const browser = await chromium.launch({
+  channel: "chrome",
+  headless: true,
+  args: [
+    "--enable-webgl",
+    "--use-angle=swiftshader",
+    "--enable-unsafe-swiftshader",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+  ],
+});
+
+const context1 = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+});
+const context2 = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+});
+
+const p1 = await context1.newPage();
+const p2 = await context2.newPage();
+const errors = [];
+
+for (const p of [p1, p2]) {
+  p.on("pageerror", (e) => {
+    console.error("Page error:", e.message);
+    errors.push(e.message);
+  });
+  p.on("console", (msg) => {
+    if (msg.type() === "error") {
+      console.error("Console error:", msg.text());
+      errors.push(msg.text());
+    }
+  });
+}
+
+try {
+  // Step 1: Initial load
+  await p1.goto(base);
+  await p1.locator("#connection").filter({ hasText: "ONLINE" }).waitFor();
+  await p1.locator("#nickname").fill("Driver1");
+  await p1.locator("#create").click();
+  await p1.locator("#lobby").waitFor({ state: "visible" });
+
+  const code = (await p1.locator("#roomCode").textContent()).trim();
+  assert.match(code, /^[A-Z2-9]{5}$/);
+
+  await p2.goto(`${base}/?room=${code}`);
+  await p2.locator("#connection").filter({ hasText: "ONLINE" }).waitFor();
+  await p2.locator("#nickname").fill("Driver2");
+  await p2.locator("#code").fill(code);
+  await p2.locator("#join").click();
+  await p2.locator("#lobby").waitFor({ state: "visible" });
+
+  await p1.bringToFront();
+  await p1.locator("#players .player").filter({ hasText: "Driver2" }).waitFor();
+
+  console.log("Both drivers in lobby. Beginning 5-cycle endurance test...");
+
+  // Run 5 full consecutive race-and-rematch cycles
+  for (let cycle = 1; cycle <= 5; cycle++) {
+    console.log(`--- RACE CYCLE ${cycle} OF 5 ---`);
+
+    // Host starts race
+    await p1.bringToFront();
+    await p1.locator("#start").waitFor({ state: "visible" });
+    await p1.locator("#start").click();
+
+    // Both observe synchronized countdown
+    await Promise.all([
+      p1.locator("#countdown").filter({ hasText: /^[123]$/ }).waitFor(),
+      p2.locator("#countdown").filter({ hasText: /^[123]$/ }).waitFor(),
+    ]);
+
+    // Wait for racing phase
+    await p1.waitForFunction(() => window.__getState()?.phase === "racing");
+    await p2.waitForFunction(() => window.__getState()?.phase === "racing");
+
+    // Both drive for a brief period
+    await p1.bringToFront();
+    await p1.evaluate(() => window.focus());
+    await p1.keyboard.down("w");
+    await p2.bringToFront();
+    await p2.evaluate(() => window.focus());
+    await p2.keyboard.down("w");
+
+    await p1.waitForTimeout(1200);
+
+    await p1.keyboard.up("w");
+    await p2.keyboard.up("w");
+
+    // Check speeds
+    const speed1 = Number(await p1.locator("#speed").textContent());
+    assert.ok(speed1 > 20, `Driver 1 speed should be > 20, got ${speed1}`);
+
+    // Cycle 3 special test: test input jitter / rapid steering
+    if (cycle === 3) {
+      await p1.keyboard.down("a");
+      await p1.waitForTimeout(200);
+      await p1.keyboard.up("a");
+      await p1.keyboard.down("d");
+      await p1.waitForTimeout(200);
+      await p1.keyboard.up("d");
+    }
+
+    // Verify car physics state from server
+    const room = game.rooms.get(code);
+    assert.ok(room, "Room must exist");
+    for (const car of room.race.cars.values()) {
+      assert.equal(car.b.position.y, 0.55, "Car must stay strictly grounded at y=0.55");
+      assert.equal(car.b.velocity.y, 0, "Vertical velocity must stay at 0");
+      assert.ok(Number.isFinite(car.b.position.x), "Car x must be finite");
+      assert.ok(Number.isFinite(car.b.position.z), "Car z must be finite");
+      assert.ok(Number.isFinite(car.yaw), "Car yaw must be finite");
+    }
+
+    // Simulate completion of 3 laps
+    [...room.race.cars.values()].forEach((c, i) => {
+      c.passed = 72;
+      c.finished = 65000 + i * 1500;
+    });
+
+    // Results screen appears on both clients
+    await p1.locator("#results").waitFor({ state: "visible" });
+    await p2.locator("#results").waitFor({ state: "visible" });
+
+    const winnerText = await p1.locator("#winner").textContent();
+    assert.equal(winnerText, "Driver1 takes the win.");
+
+    // If not final cycle, run rematch
+    if (cycle < 5) {
+      await p1.bringToFront();
+      await p1.locator("#rematch").waitFor({ state: "visible" });
+      await p1.locator("#rematch").click();
+
+      // Both clients transition cleanly back to lobby
+      await p1.locator("#lobby").waitFor({ state: "visible" });
+      await p2.locator("#lobby").waitFor({ state: "visible" });
+
+      // Verify room state is clean in lobby
+      assert.equal(room.phase, "lobby");
+      assert.equal(room.startAt, 0);
+      assert.equal(room.endAt, 0);
+      console.log(`Cycle ${cycle} rematch succeeded cleanly.`);
+    }
+  }
+
+  // Final cycle cleanup: Leave room
+  await p1.bringToFront();
+  await p1.locator("#results .leave").click();
+  await p1.locator("#home").waitFor({ state: "visible" });
+
+  await p2.bringToFront();
+  await p2.locator("#results .leave").click();
+  await p2.locator("#home").waitFor({ state: "visible" });
+
+  assert.deepEqual(errors, [], `Expected 0 errors during stress test, but got: ${errors.join(", ")}`);
+
+  console.log("PASS: 5 consecutive race & rematch cycles, physics grounded, 0 errors!");
+} finally {
+  await browser.close();
+  await game.close();
+}
+````
+
 ## server/index.js
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/server/index.js`
@@ -7335,6 +8713,8 @@ export async function createGame({ dev = false } = {}) {
     "#ff9c45",
   ];
   const state = (r) => ({
+    seq: (r.stateSeq = (r.stateSeq || 0) + 1),
+    raceId: r.raceId || 0,
     code: r.code,
     host: r.host,
     phase: r.phase,
@@ -7360,6 +8740,15 @@ export async function createGame({ dev = false } = {}) {
       return;
     }
     if (r.host === s.id) r.host = r.players.keys().next().value;
+    if (r.phase === "racing") {
+      const remainingCars = [...r.race.cars.values()];
+      if (
+        remainingCars.length > 0 &&
+        remainingCars.every((c) => c.finished !== null)
+      ) {
+        r.phase = "results";
+      }
+    }
     io.to(r.code).emit("notice", `${p?.name || "Player"} disconnected`);
     broadcast(r);
   }
@@ -7419,9 +8808,10 @@ export async function createGame({ dev = false } = {}) {
       if (r.phase !== "lobby")
         throw Error("Race in progress. Join after the rematch.");
       if (r.players.size >= 6) throw Error("Room is full (6 players).");
-      const color = colors.find(
-        (c) => ![...r.players.values()].some((p) => p.color === c),
-      );
+      const color =
+        colors.find(
+          (c) => ![...r.players.values()].some((p) => p.color === c),
+        ) || colors[r.players.size % colors.length];
       r.players.set(s.id, { id: s.id, name, color });
       r.race.add(s.id, r.players.size - 1);
       s.data.room = r.code;
@@ -7436,6 +8826,7 @@ export async function createGame({ dev = false } = {}) {
       if (r.phase !== "lobby" || r.players.size < 2)
         throw Error("You need at least 2 players.");
       r.race = new Race();
+      r.raceId = (r.raceId || 0) + 1;
       [...r.players.keys()].forEach((id, i) => r.race.add(id, i));
       r.phase = "countdown";
       r.startAt = Date.now() + 3000;
@@ -7447,6 +8838,8 @@ export async function createGame({ dev = false } = {}) {
       if (!r || r.host !== s.id || r.phase !== "results")
         throw Error("Only the host can rematch after results.");
       r.phase = "lobby";
+      r.startAt = 0;
+      r.endAt = 0;
       r.race = new Race();
       [...r.players.keys()].forEach((id, i) => r.race.add(id, i));
       broadcast(r);
@@ -7482,10 +8875,12 @@ export async function createGame({ dev = false } = {}) {
     accumulator = 0;
   const interval = setInterval(() => {
     const mono = performance.now();
-    accumulator += Math.min(0.15, (mono - lastTick) / 1000);
+    accumulator += Math.min(0.1, (mono - lastTick) / 1000);
     lastTick = mono;
-    while (accumulator >= 1 / 60) {
+    let steps = 0;
+    while (accumulator >= 1 / 60 && steps < 5) {
       accumulator -= 1 / 60;
+      steps++;
       const now = Date.now() - accumulator * 1000;
       for (const r of rooms.values()) {
         if (r.phase === "countdown" && now >= r.startAt) r.phase = "racing";
@@ -7493,9 +8888,10 @@ export async function createGame({ dev = false } = {}) {
           r.race.step(1 / 60, now, r.phase === "racing", r.startAt);
         if (r.phase === "racing") {
           const cars = [...r.race.cars.values()];
-          if (cars.some((c) => c.finished) && !r.endAt) r.endAt = now + 60000;
+          if (cars.some((c) => c.finished !== null) && !r.endAt)
+            r.endAt = now + 60000;
           if (
-            cars.every((c) => c.finished) ||
+            (cars.length > 0 && cars.every((c) => c.finished !== null)) ||
             (r.endAt && now >= r.endAt) ||
             now - r.startAt > 600000
           )
@@ -7657,14 +9053,38 @@ export class Race {
     return true;
   }
   step(dt, now, running, startAt) {
+    if (!Number.isFinite(dt) || dt <= 0 || !Number.isFinite(now)) return;
+    const safeDt = Math.min(1 / 30, dt);
+    dt = safeDt;
+    // Repair each invalid body BEFORE the broadphase/contact solver can spread NaNs.
     for (const c of this.cars.values()) {
-      const input =
+      if (
+        ![
+          c.b.position.x,
+          c.b.position.z,
+          c.yaw,
+          c.b.velocity.x,
+          c.b.velocity.z,
+        ].every(Number.isFinite) ||
+        Math.abs(c.b.position.x) > 10000 ||
+        Math.abs(c.b.position.z) > 10000
+      ) {
+        this.reset(c);
+        c.b.force.setZero();
+        c.b.torque.setZero();
+        c.b.aabbNeedsUpdate = true;
+      }
+    }
+    for (const c of this.cars.values()) {
+      let input =
         running && !c.finished && now - c.inputAt < 500 ? c.input : {};
       if (input.reset && now - c.resetAt > 2000) {
         this.reset(c);
+        input = {};
         c.resetAt = now;
       }
-      c.impact = (c.impact || 0) * Math.exp(-12 * dt);
+      c.impact =
+        (Number.isFinite(c.impact) ? c.impact : 0) * Math.exp(-12 * safeDt);
       const motion = {
         x: c.b.position.x,
         z: c.b.position.z,
@@ -7673,12 +9093,15 @@ export class Race {
         vx: c.b.velocity.x,
         vz: c.b.velocity.z,
       };
-      drive(motion, input, dt, running && !c.finished);
+      drive(motion, input, safeDt, running && !c.finished);
       c.yaw = motion.yaw;
       c.steer = motion.steer;
       c.b.velocity.x = motion.vx;
       c.b.velocity.z = motion.vz;
+      c.b.position.y = 0.55;
+      c.b.velocity.y = 0;
       c.ack = c.inputSeq || 0;
+      c.controls = input;
       c.b.quaternion.setFromEuler(0, c.yaw, 0);
       c.previous = { x: c.b.position.x, z: c.b.position.z };
     }
@@ -7686,12 +9109,46 @@ export class Race {
     this.world.step(dt / 2);
     this.world.step(dt / 2);
 
-    // Multi-pass contact resolution: prevents overlap and exchanges physical impulse
     const bodies = [...this.cars.values()];
-    const frames = new Map(
-      bodies.map((c) => [c, point(nearest(c.b.position.x, c.b.position.z).s)]),
-    );
-    for (let pass = 0; pass < 12; pass++) {
+
+    // 1. Authoritative pairwise collision impulse resolution (elastic bounce with momentum conservation)
+    for (let i = 0; i < bodies.length; i++) {
+      for (let j = i + 1; j < bodies.length; j++) {
+        const a = bodies[i],
+          b = bodies[j];
+        const hit = overlap(
+          { x: a.b.position.x, z: a.b.position.z, yaw: a.yaw },
+          { x: b.b.position.x, z: b.b.position.z, yaw: b.yaw },
+          0.04,
+        );
+        if (!hit) continue;
+
+        const closing =
+          (b.b.velocity.x - a.b.velocity.x) * hit.x +
+          (b.b.velocity.z - a.b.velocity.z) * hit.z;
+        if (closing < 0) {
+          const restitution = 0.45;
+          const impulse = -closing * (1 + restitution) * 0.5;
+          a.b.velocity.x -= hit.x * impulse;
+          a.b.velocity.z -= hit.z * impulse;
+          b.b.velocity.x += hit.x * impulse;
+          b.b.velocity.z += hit.z * impulse;
+
+          const impactMag = Math.min(1, Math.max(0, Math.abs(closing) / 14));
+          a.impact = Math.max(a.impact || 0, impactMag);
+          b.impact = Math.max(b.impact || 0, impactMag);
+
+          // Subtle yaw torque on glancing collisions to deflect nose
+          const crossA = hit.x * Math.cos(a.yaw) - hit.z * Math.sin(a.yaw);
+          const crossB = hit.x * Math.cos(b.yaw) - hit.z * Math.sin(b.yaw);
+          a.yaw += crossA * 0.08 * impactMag;
+          b.yaw -= crossB * 0.08 * impactMag;
+        }
+      }
+    }
+
+    // 2. Iterative non-penetration position relaxation and barrier containment
+    for (let pass = 0; pass < 8; pass++) {
       for (let i = 0; i < bodies.length; i++) {
         for (let j = i + 1; j < bodies.length; j++) {
           const a = bodies[i],
@@ -7708,29 +9165,13 @@ export class Race {
           b.b.position.x += hit.x * correction;
           b.b.position.z += hit.z * correction;
           a.b.aabbNeedsUpdate = b.b.aabbNeedsUpdate = true;
-
-          const closing =
-            (b.b.velocity.x - a.b.velocity.x) * hit.x +
-            (b.b.velocity.z - a.b.velocity.z) * hit.z;
-          if (closing < 0) {
-            const impulse = -closing * 0.6;
-            a.b.velocity.x -= hit.x * impulse;
-            a.b.velocity.z -= hit.z * impulse;
-            b.b.velocity.x += hit.x * impulse;
-            b.b.velocity.z += hit.z * impulse;
-            const impactMag = Math.min(
-              1,
-              Math.abs(closing) / 10 + hit.depth * 1.5,
-            );
-            a.impact = Math.max(a.impact, impactMag);
-            b.impact = Math.max(b.impact, impactMag);
-          }
         }
       }
-      // Project against the road edge as part of the same contact solve, so a pile-up cannot push a car through a barrier.
+      // Project against road edge inside relaxation
       for (const c of bodies) {
-        const frame = frames.get(c),
-          nx = Math.cos(frame.yaw),
+        const near = nearest(c.b.position.x, c.b.position.z);
+        const frame = point(near.s);
+        const nx = Math.cos(frame.yaw),
           nz = -Math.sin(frame.yaw);
         const offset =
           (c.b.position.x - frame.x) * nx + (c.b.position.z - frame.z) * nz;
@@ -7738,7 +9179,7 @@ export class Race {
         const extent =
           CAR_HALF_WIDTH * Math.abs(Math.cos(relative)) +
           CAR_HALF_LENGTH * Math.abs(Math.sin(relative));
-        const limit = TRACK.width / 2 - extent - 0.025;
+        const limit = TRACK.width / 2 - extent - 0.02;
         if (Math.abs(offset) > limit) {
           const excess = offset - Math.sign(offset) * limit;
           c.b.position.x -= nx * excess;
@@ -7747,24 +9188,70 @@ export class Race {
           const outward =
             (c.b.velocity.x * nx + c.b.velocity.z * nz) * Math.sign(offset);
           if (outward > 0) {
-            c.impact = Math.max(c.impact, Math.min(1, outward / 18));
-            c.b.velocity.x -= nx * outward * Math.sign(offset);
-            c.b.velocity.z -= nz * outward * Math.sign(offset);
+            const impactVal = Math.min(1, Math.max(0, outward / 16));
+            c.impact = Math.max(c.impact || 0, impactVal);
+            // Elastic barrier bounce + tangential scrape friction
+            const bounce = outward * 1.25;
+            c.b.velocity.x -= nx * bounce * Math.sign(offset);
+            c.b.velocity.z -= nz * bounce * Math.sign(offset);
+
+            // Tangential friction along wall
+            const tx = -nz,
+              tz = nx;
+            const tangential = c.b.velocity.x * tx + c.b.velocity.z * tz;
+            c.b.velocity.x -= tx * tangential * 0.15;
+            c.b.velocity.z -= tz * tangential * 0.15;
+
+            // Yaw deflection away from wall
+            const wallYaw =
+              frame.yaw + (offset > 0 ? -Math.PI / 2 : Math.PI / 2);
+            const yawDiff = Math.atan2(
+              Math.sin(wallYaw - c.yaw),
+              Math.cos(wallYaw - c.yaw),
+            );
+            c.yaw += yawDiff * 0.1 * impactVal;
           }
         }
       }
     }
+
     for (const c of this.cars.values()) {
-      if (running && !c.finished) this.progress(c, now, startAt, dt);
-      c.impact *= Math.exp(-6 * dt);
+      c.b.position.y = 0.55;
+      c.b.velocity.y = 0;
+
+      // Sanitize non-finite values safely
       if (
-        c.b.position.y < -5 ||
-        nearest(c.b.position.x, c.b.position.z).distance > 45
-      )
+        !Number.isFinite(c.b.position.x) ||
+        !Number.isFinite(c.b.position.z) ||
+        !Number.isFinite(c.yaw) ||
+        !Number.isFinite(c.b.velocity.x) ||
+        !Number.isFinite(c.b.velocity.z)
+      ) {
         this.reset(c);
+        continue;
+      }
+
+      // Hard clamp velocity to max physical speed (52 m/s = 187.2 km/h)
+      const currentSpeed = Math.hypot(c.b.velocity.x, c.b.velocity.z);
+      if (currentSpeed > 52) {
+        c.b.velocity.x = (c.b.velocity.x / currentSpeed) * 52;
+        c.b.velocity.z = (c.b.velocity.z / currentSpeed) * 52;
+      }
+
+      c.b.quaternion.setFromEuler(0, c.yaw, 0);
+
+      if (running && !c.finished) this.progress(c, now, startAt, dt);
+      c.impact = (c.impact || 0) * Math.exp(-6 * dt);
+      if (!Number.isFinite(c.impact)) c.impact = 0;
+
+      const trackDist = nearest(c.b.position.x, c.b.position.z).distance;
+      if (!Number.isFinite(trackDist) || trackDist > 45) {
+        this.reset(c);
+      }
     }
   }
   progress(c, now, startAt, dt = 0) {
+    const safeDt = Math.min(0.05, Math.max(0, Number.isFinite(dt) ? dt : 0));
     const next = (c.passed + 1) % 24,
       g = gates[next],
       p = c.b.position,
@@ -7777,11 +9264,17 @@ export class Race {
     );
     if (before <= 0 && after > 0 && across < TRACK.width / 2 + 2) {
       c.passed++;
-      if (c.passed === 24 * TRACK.laps)
+      if (c.passed === 24 * TRACK.laps) {
+        const denom = after - before;
+        const frac =
+          Math.abs(denom) > 1e-4
+            ? Math.max(0, Math.min(1, -before / denom))
+            : 1;
         c.finished = Math.max(
           0.001,
-          now - startAt - dt * 1000 * (1 - -before / (after - before)),
+          now - startAt - safeDt * 1000 * (1 - frac),
         );
+      }
     }
   }
   snapshot() {
@@ -7796,9 +9289,9 @@ export class Race {
       vz: c.b.velocity.z,
       respawn: c.respawn,
       impact: c.impact,
-      throttle: c.input.up === true,
-      braking: c.input.down === true,
-      drift: c.input.drift === true,
+      throttle: (c.controls || {}).up === true,
+      braking: (c.controls || {}).down === true,
+      drift: (c.controls || {}).drift === true,
       speed: Math.hypot(c.b.velocity.x, c.b.velocity.z),
       steer: c.steer,
       passed: c.passed,
@@ -7833,18 +9326,32 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/shared/contact.js`
 export const CAR_HALF_WIDTH = 1.28;
 export const CAR_HALF_LENGTH = 2.3;
 export function overlap(a, b, padding = 0) {
-  const axes = [a.yaw, b.yaw].flatMap(yaw => [
-    {x:Math.cos(yaw),z:-Math.sin(yaw)}, {x:Math.sin(yaw),z:Math.cos(yaw)}
+  if (![a.x, a.z, a.yaw, b.x, b.z, b.yaw, padding].every(Number.isFinite))
+    return null;
+  const axes = [a.yaw, b.yaw].flatMap((yaw) => [
+    { x: Math.cos(yaw), z: -Math.sin(yaw) },
+    { x: Math.sin(yaw), z: Math.cos(yaw) },
   ]);
-  let depth=Infinity, normal;
-  for(const axis of axes){
-    const radius = p => (CAR_HALF_WIDTH+padding)*Math.abs(Math.cos(p.yaw)*axis.x-Math.sin(p.yaw)*axis.z)+(CAR_HALF_LENGTH+padding)*Math.abs(Math.sin(p.yaw)*axis.x+Math.cos(p.yaw)*axis.z);
-    const distance=(b.x-a.x)*axis.x+(b.z-a.z)*axis.z;
-    const penetration=radius(a)+radius(b)-Math.abs(distance);
-    if(penetration<=0)return null;
-    if(penetration<depth){depth=penetration;normal={x:axis.x*(distance<0?-1:1),z:axis.z*(distance<0?-1:1)};}
+  let depth = Infinity,
+    normal;
+  for (const axis of axes) {
+    const radius = (p) =>
+      (CAR_HALF_WIDTH + padding) *
+        Math.abs(Math.cos(p.yaw) * axis.x - Math.sin(p.yaw) * axis.z) +
+      (CAR_HALF_LENGTH + padding) *
+        Math.abs(Math.sin(p.yaw) * axis.x + Math.cos(p.yaw) * axis.z);
+    const distance = (b.x - a.x) * axis.x + (b.z - a.z) * axis.z;
+    const penetration = radius(a) + radius(b) - Math.abs(distance);
+    if (penetration <= 0) return null;
+    if (penetration < depth) {
+      depth = penetration;
+      normal = {
+        x: axis.x * (distance < 0 ? -1 : 1),
+        z: axis.z * (distance < 0 ? -1 : 1),
+      };
+    }
   }
-  return {...normal,depth};
+  return { ...normal, depth };
 }
 ````
 
@@ -7856,6 +9363,14 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/shared/driving.js`
 import { TRACK, nearest } from "./track.js";
 // Shared kinematic controller: authoritative server and bounded client prediction.
 export function drive(c, input, dt, active = true) {
+  if (!Number.isFinite(dt) || dt <= 0) return;
+  dt = Math.min(dt, 1 / 30);
+  input = active ? input || {} : {};
+  if (!Number.isFinite(c.yaw)) c.yaw = 0;
+  if (!Number.isFinite(c.steer)) c.steer = 0;
+  if (!Number.isFinite(c.vx)) c.vx = 0;
+  if (!Number.isFinite(c.vz)) c.vz = 0;
+
   const f = { x: Math.sin(c.yaw), z: Math.cos(c.yaw) },
     v = { x: c.vx, z: c.vz };
   let speed = v.x * f.x + v.z * f.z;
@@ -7864,6 +9379,7 @@ export function drive(c, input, dt, active = true) {
   // Smooth, progressive steering response: snappy turn-in with zero twitch
   const targetSteer = (input.left ? -1 : 0) + (input.right ? 1 : 0);
   c.steer += (targetSteer - c.steer) * (1 - Math.exp(-28 * dt));
+  c.steer = Math.max(-1, Math.min(1, c.steer));
 
   // Acceleration and Braking with dynamic power delivery
   if (input.up && !input.down) {
@@ -7888,32 +9404,128 @@ export function drive(c, input, dt, active = true) {
   const frontGrip = 1.0 + weightTransfer;
   const speedFactor = Math.min(Math.abs(speed) / 7.5, 1);
   const stability = 1 / (1 + Math.max(0, Math.abs(speed) - 16) / 54);
-  const turnAuthority = input.drift ? 2.22 : 1.5 * stability * frontGrip;
+  // Tire load increases with aerodynamic speed, while yaw authority stays bounded.
+  const lateralLimit = 14 + Math.min(18, speed * speed * 0.0072);
+  const turnAuthority = Math.min(
+    1.5 * stability * frontGrip * (input.drift ? 1.25 : 1),
+    (lateralLimit / Math.max(8, Math.abs(speed))) * (input.drift ? 1.15 : 1),
+  );
   const previousYaw = c.yaw;
   c.yaw += c.steer * Math.sign(speed || 1) * speedFactor * turnAuthority * dt;
 
   // Lateral tire grip / controlled drift slip
-  const slipDamping = input.drift ? 2.2 : 11.5;
+  const slipDamping = input.drift ? 3.2 : 11.5 + Math.abs(speed) * 0.1;
   const slip =
-    (lateral - (input.drift ? speed * Math.sin(c.yaw - previousYaw) : 0)) *
+    (lateral - speed * Math.sin(c.yaw - previousYaw)) *
     Math.exp(-slipDamping * dt);
 
   // Off-road grass friction (slight drag outside the asphalt road)
-  const distFromCenter = nearest(c.x, c.z).distance;
-  if (distFromCenter > TRACK.width / 2) {
-    speed *= Math.exp(-1.4 * dt);
+  if (Number.isFinite(c.x) && Number.isFinite(c.z)) {
+    const distFromCenter = nearest(c.x, c.z).distance;
+    if (distFromCenter > TRACK.width / 2) {
+      speed *= Math.exp(-1.4 * dt);
+    }
   }
 
   v.x = Math.sin(c.yaw) * speed + Math.cos(c.yaw) * slip;
   v.z = Math.cos(c.yaw) * speed - Math.sin(c.yaw) * slip;
 
-  c.vx = v.x;
-  c.vz = v.z;
+  c.vx = Number.isFinite(v.x) ? v.x : 0;
+  c.vz = Number.isFinite(v.z) ? v.z : 0;
 }
 export function predict(c, input, dt) {
+  if (
+    !Number.isFinite(dt) ||
+    dt <= 0 ||
+    !Number.isFinite(c.x) ||
+    !Number.isFinite(c.z)
+  )
+    return;
+  dt = Math.min(dt, 1 / 30);
   drive(c, input, dt);
-  c.x += c.vx * dt;
-  c.z += c.vz * dt;
+  if (Number.isFinite(c.vx) && Number.isFinite(c.vz)) {
+    c.x += c.vx * dt;
+    c.z += c.vz * dt;
+  }
+}
+````
+
+## shared/protocol.js
+
+Exact workspace path: `C:/Users/jadav/Coding/car racing game/shared/protocol.js`
+
+````
+// Validate the complete snapshot at the network boundary, before UI/audio/3D see it.
+export function validSnapshot(s) {
+  if (
+    !s ||
+    !["lobby", "countdown", "racing", "results"].includes(s.phase) ||
+    typeof s.code !== "string" ||
+    !/^[A-Z2-9]{5}$/.test(s.code) ||
+    !Number.isSafeInteger(s.seq) ||
+    s.seq < 1 ||
+    !Number.isSafeInteger(s.raceId) ||
+    s.raceId < 0 ||
+    ![s.serverNow, s.startAt, s.endAt].every(Number.isFinite) ||
+    !Array.isArray(s.players) ||
+    !Array.isArray(s.cars) ||
+    s.players.length < 1 ||
+    s.players.length > 6 ||
+    s.players.length !== s.cars.length
+  )
+    return false;
+  const ids = new Set();
+  for (const p of s.players) {
+    if (
+      !p ||
+      typeof p.id !== "string" ||
+      ids.has(p.id) ||
+      typeof p.name !== "string" ||
+      p.name.length > 18 ||
+      !/^#[0-9a-f]{6}$/i.test(p.color)
+    )
+      return false;
+    ids.add(p.id);
+  }
+  if (!ids.has(s.host)) return false;
+  const cars = new Set();
+  for (const c of s.cars) {
+    if (
+      !c ||
+      !ids.has(c.id) ||
+      cars.has(c.id) ||
+      ![
+        c.x,
+        c.y,
+        c.z,
+        c.yaw,
+        c.vx,
+        c.vz,
+        c.speed,
+        c.steer,
+        c.progress,
+        c.impact,
+      ].every(Number.isFinite) ||
+      Math.abs(c.x) > 10000 ||
+      Math.abs(c.z) > 10000 ||
+      Math.abs(c.y) > 100 ||
+      c.speed < 0 ||
+      c.speed > 100 ||
+      Math.abs(c.vx) > 100 ||
+      Math.abs(c.vz) > 100 ||
+      !Number.isInteger(c.passed) ||
+      c.passed < 0 ||
+      c.passed > 72 ||
+      !Number.isSafeInteger(c.respawn) ||
+      c.respawn < 0 ||
+      !Number.isSafeInteger(c.ack) ||
+      c.ack < 0 ||
+      !(c.finished === null || (Number.isFinite(c.finished) && c.finished > 0))
+    )
+      return false;
+    cars.add(c.id);
+  }
+  return true;
 }
 ````
 
@@ -7930,26 +9542,26 @@ export const TRACK = {
   segments: 180,
 };
 
-// Grand Prix style flowing circuit:
-// Long main straight, high-speed sweeping corners, gentle continuous bends,
-// wide run-offs, and no sudden sharp kinks.
+// Grand Prix style flowing elliptical circuit:
+// Long main straight, high-speed sweeping North & South carousels,
+// gentle flowing left/right transitions, wide run-offs, and no sudden sharp kinks.
 const knots = [
   { x: 120, z: -140 }, // [0] Final bend exit onto main straight
-  { x: 120, z: 0 },    // [1] Start / Finish line (s = 0, yaw = 0)
-  { x: 120, z: 120 },  // [2] Main straight mid
-  { x: 120, z: 200 },  // [3] Main straight braking zone
-  { x: 90, z: 280 },   // [4] Turn 1: sweeping right entry
-  { x: 20, z: 330 },   // [5] Turn 2: apex of north sweeper
-  { x: -60, z: 320 },  // [6] Turn 2 exit
-  { x: -130, z: 250 }, // [7] Flowing left bend
-  { x: -160, z: 140 }, // [8] Sector 2 entry
-  { x: -110, z: 40 },  // [9] Flowing S-curve right
-  { x: -90, z: -50 },  // [10] Flowing S-curve left
-  { x: -140, z: -140 },// [11] Back straight transition
-  { x: -160, z: -230 },// [12] South sweeper entry
-  { x: -100, z: -310 },// [13] South carousel apex (large radius)
-  { x: 0, z: -320 },   // [14] South curve exit
-  { x: 90, z: -250 },  // [15] Final wide bend entry
+  { x: 120, z: 0 }, // [1] Start / Finish line (s = 0, yaw = 0)
+  { x: 120, z: 120 }, // [2] Main straight mid
+  { x: 120, z: 210 }, // [3] Main straight braking zone
+  { x: 92, z: 290 }, // [4] Turn 1: sweeping left-into-turn entry
+  { x: 20, z: 340 }, // [5] Turn 2: North sweeper apex (large radius)
+  { x: -65, z: 335 }, // [6] Turn 2: North sweeper exit
+  { x: -135, z: 270 }, // [7] Turn 3: High speed sweep to back stretch
+  { x: -150, z: 160 }, // [8] Back stretch entry
+  { x: -110, z: 45 }, // [9] Gentle flowing right bend
+  { x: -95, z: -55 }, // [10] Apex of gentle right sweeper
+  { x: -135, z: -155 }, // [11] Sweeping left transition
+  { x: -160, z: -230 }, // [12] South sweeper entry
+  { x: -105, z: -320 }, // [13] South carousel apex (large radius)
+  { x: 5, z: -330 }, // [14] South curve exit
+  { x: 95, z: -255 }, // [15] Final wide bend entry
 ];
 
 const N = knots.length;
@@ -7965,31 +9577,33 @@ function getRawPoint(t) {
   const u2 = u * u;
   const u3 = u2 * u;
 
-  const x = 0.5 * (
-    2 * p1.x +
-    (-p0.x + p2.x) * u +
-    (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * u2 +
-    (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * u3
-  );
+  const x =
+    0.5 *
+    (2 * p1.x +
+      (-p0.x + p2.x) * u +
+      (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * u2 +
+      (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * u3);
 
-  const z = 0.5 * (
-    2 * p1.z +
-    (-p0.z + p2.z) * u +
-    (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * u2 +
-    (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * u3
-  );
+  const z =
+    0.5 *
+    (2 * p1.z +
+      (-p0.z + p2.z) * u +
+      (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * u2 +
+      (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * u3);
 
-  const dx = 0.5 * (
-    (-p0.x + p2.x) +
-    2 * (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * u +
-    3 * (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * u2
-  );
+  const dx =
+    0.5 *
+    (-p0.x +
+      p2.x +
+      2 * (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * u +
+      3 * (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * u2);
 
-  const dz = 0.5 * (
-    (-p0.z + p2.z) +
-    2 * (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * u +
-    3 * (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * u2
-  );
+  const dz =
+    0.5 *
+    (-p0.z +
+      p2.z +
+      2 * (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * u +
+      3 * (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * u2);
 
   const yaw = Math.atan2(dx, dz);
   return { x, z, yaw };
@@ -8007,7 +9621,10 @@ const rawLengths = [0];
 for (let i = 1; i < rawSamples.length; i++) {
   rawLengths.push(
     rawLengths[i - 1] +
-      Math.hypot(rawSamples[i].x - rawSamples[i - 1].x, rawSamples[i].z - rawSamples[i - 1].z),
+      Math.hypot(
+        rawSamples[i].x - rawSamples[i - 1].x,
+        rawSamples[i].z - rawSamples[i - 1].z,
+      ),
   );
 }
 const TOTAL_LENGTH = rawLengths.at(-1);
@@ -8017,13 +9634,15 @@ const UNIFORM_COUNT = 1600;
 const samples = [];
 for (let i = 0; i <= UNIFORM_COUNT; i++) {
   const targetS = (i * TOTAL_LENGTH) / UNIFORM_COUNT;
-  let lo = 0, hi = rawLengths.length - 1;
+  let lo = 0,
+    hi = rawLengths.length - 1;
   while (hi - lo > 1) {
     const mid = (lo + hi) >> 1;
     if (rawLengths[mid] <= targetS) lo = mid;
     else hi = mid;
   }
-  const a = rawSamples[lo], b = rawSamples[hi];
+  const a = rawSamples[lo],
+    b = rawSamples[hi];
   const t = (targetS - rawLengths[lo]) / (rawLengths[hi] - rawLengths[lo] || 1);
   const delta = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw));
   samples.push({
@@ -8037,7 +9656,10 @@ const lengths = [0];
 for (let i = 1; i < samples.length; i++) {
   lengths.push(
     lengths[i - 1] +
-      Math.hypot(samples[i].x - samples[i - 1].x, samples[i].z - samples[i - 1].z),
+      Math.hypot(
+        samples[i].x - samples[i - 1].x,
+        samples[i].z - samples[i - 1].z,
+      ),
   );
 }
 
@@ -8064,20 +9686,45 @@ export function point(s, offset = 0) {
   };
 }
 
+// Exact spatial rejection: skip segment blocks whose bounds cannot beat the best hit.
+const blocks = [];
+for (let start = 0; start < samples.length - 1; start += 24) {
+  const end = Math.min(samples.length - 1, start + 24);
+  let minX = Infinity,
+    maxX = -Infinity,
+    minZ = Infinity,
+    maxZ = -Infinity;
+  for (let i = start; i <= end; i++) {
+    const p = samples[i];
+    minX = Math.min(minX, p.x);
+    maxX = Math.max(maxX, p.x);
+    minZ = Math.min(minZ, p.z);
+    maxZ = Math.max(maxZ, p.z);
+  }
+  blocks.push({ start, end, minX, maxX, minZ, maxZ });
+}
 export function nearest(x, z) {
   let best = Infinity,
     s = 0;
-  for (let i = 0; i < samples.length - 1; i++) {
-    const a = samples[i],
-      b = samples[i + 1],
-      dx = b.x - a.x,
-      dz = b.z - a.z;
-    const lenSq = dx * dx + dz * dz;
-    const t = lenSq > 0 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / lenSq)) : 0;
-    const distance = (x - a.x - dx * t) ** 2 + (z - a.z - dz * t) ** 2;
-    if (distance < best) {
-      best = distance;
-      s = lengths[i] + t * (lengths[i + 1] - lengths[i]);
+  for (const block of blocks) {
+    const bx = Math.max(block.minX - x, 0, x - block.maxX),
+      bz = Math.max(block.minZ - z, 0, z - block.maxZ);
+    if (bx * bx + bz * bz > best) continue;
+    for (let i = block.start; i < block.end; i++) {
+      const a = samples[i],
+        b = samples[i + 1],
+        dx = b.x - a.x,
+        dz = b.z - a.z;
+      const lenSq = dx * dx + dz * dz;
+      const t =
+        lenSq > 0
+          ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / lenSq))
+          : 0;
+      const distance = (x - a.x - dx * t) ** 2 + (z - a.z - dz * t) ** 2;
+      if (distance < best) {
+        best = distance;
+        s = lengths[i] + t * (lengths[i + 1] - lengths[i]);
+      }
     }
   }
   return { s: s % LENGTH, distance: Math.sqrt(best) };

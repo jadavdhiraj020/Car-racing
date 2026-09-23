@@ -44,8 +44,10 @@ export function drive(c, input, dt, active = true) {
   const stability = 1 / (1 + Math.max(0, Math.abs(speed) - 16) / 54);
   // Tire load increases with aerodynamic speed, while yaw authority stays bounded.
   const lateralLimit = 14 + Math.min(18, speed * speed * 0.0072);
-  const turnAuthority = Math.min(1.5 * stability * frontGrip * (input.drift ? 1.25 : 1),
-    lateralLimit / Math.max(8, Math.abs(speed)) * (input.drift ? 1.15 : 1));
+  const turnAuthority = Math.min(
+    1.5 * stability * frontGrip * (input.drift ? 1.25 : 1),
+    (lateralLimit / Math.max(8, Math.abs(speed))) * (input.drift ? 1.15 : 1),
+  );
   const previousYaw = c.yaw;
   c.yaw += c.steer * Math.sign(speed || 1) * speedFactor * turnAuthority * dt;
 

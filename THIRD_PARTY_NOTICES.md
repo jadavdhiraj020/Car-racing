@@ -1,6 +1,6 @@
 # Bundled font licenses
 
-Fonts are served locally from the production build. Engine audio, car geometry and reflection textures are procedural.
+Fonts are served locally from the production build. Engine audio, car geometry and reflection textures are procedural. The ambient music in client/src/music.js is an original procedural composition included under this project's MIT license; it uses no recordings, commercial songs or third-party sample libraries.
 
 ## barlow-condensed
 

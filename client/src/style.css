@@ -827,3 +827,51 @@ footer,
     max-width: 130px;
   }
 }
+
+.audio-panel {
+  position: fixed;
+  z-index: 7;
+  top: 80px;
+  right: 40px;
+  width: min(310px, 90vw);
+  max-height: calc(100dvh - 100px);
+  overflow: auto;
+}
+.audio-panel label {
+  margin: 18px 0 5px;
+  display: flex;
+  justify-content: space-between;
+}
+.audio-panel input {
+  padding: 0;
+  accent-color: #d6fc71;
+  cursor: pointer;
+  height: 20px;
+}
+.audio-panel output {
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 700px) {
+  .audio-panel {
+    top: 72px;
+    right: 15px;
+  }
+  header {
+    padding: 12px;
+  }
+  .brand {
+    font-size: 30px;
+  }
+  .top-right {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 270px;
+  }
+  #connection {
+    width: 100%;
+    text-align: right;
+  }
+  .hud-top {
+    top: 90px;
+  }
+}

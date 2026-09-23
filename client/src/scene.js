@@ -1107,6 +1107,10 @@ export function createScene(canvas, audioSystem = null) {
       dispose: () => {
         if (audioSystem) audioSystem.removeRemoteCar(player.id);
         root.dispose();
+        if (shadowGen)
+          shadowGen.getShadowMap().renderList = shadowGen
+            .getShadowMap()
+            .renderList.filter((m) => !m.isDisposed());
         paint.dispose();
         helmetPaint.dispose();
         liveryStripeMat.dispose();
@@ -1158,7 +1162,12 @@ export function createScene(canvas, audioSystem = null) {
       const distJump =
         c.samples.length > 0 &&
         Math.hypot(c.samples.at(-1).x - t.x, c.samples.at(-1).z - t.z) > 18;
-      if (!c.target || c.target.respawn !== t.respawn || phaseReset || distJump) {
+      if (
+        !c.target ||
+        c.target.respawn !== t.respawn ||
+        phaseReset ||
+        distJump
+      ) {
         c.samples = [];
         c.root.position.set(t.x, t.y, t.z);
         c.root.rotation.y = t.yaw;
@@ -1282,465 +1291,648 @@ export function createScene(canvas, audioSystem = null) {
 
   const scratchAnchor = new Vector3();
   const identityMatrix = Matrix.Identity();
+  const lookSpring = camera.getTarget().clone();
+  const frameTimes = new Float64Array(360);
+  let frameCount = 0,
+    failedFrames = 0,
+    renderMs = 0,
+    drawCalls = 0,
+    qualityLevel = 1,
+    resolution = 1.5;
+  let qualityElapsed = 0,
+    qualitySum = 0,
+    qualityFrames = 0,
+    hudRects = [],
+    hudRectsAt = 0;
+  const qualityScales = [2, 1.5, 1, 0.8];
+  const hudNodes = [
+    ...document.querySelectorAll(
+      "header,.hud-top,#leaderboard,#minimap,.speed,#touch,#audioPanel",
+    ),
+  ];
 
   engine.runRenderLoop(() => {
     try {
-      const now = performance.now(),
-        dt = Math.min(Math.max(0.001, (now - last) / 1000), 0.05);
+      const now = performance.now();
+      const elapsed = Math.max(0, (now - last) / 1000);
+      if (document.hidden) {
+        last = now;
+        return;
+      }
+      const dt = Math.min(elapsed, 0.05);
+      frameTimes[frameCount++ % frameTimes.length] = elapsed * 1000;
+      const targetInterpDelay = Math.max(
+        55,
+        Math.min(180, predictionRtt / 2 + 2 * jitterStdDev + 30),
+      );
+      smoothInterpDelay +=
+        (targetInterpDelay - smoothInterpDelay) * (1 - Math.exp(-3 * dt));
+      const renderAt = now - smoothInterpDelay;
+      if (elapsed < 0.15) {
+        qualityElapsed += elapsed;
+        qualitySum += elapsed;
+        qualityFrames++;
+      }
+      if (qualityElapsed > 4) {
+        const mean = qualitySum / Math.max(1, qualityFrames),
+          base = qualityScales[qualityLevel];
+        const next =
+          mean > 0.022
+            ? Math.min(base + 0.6, resolution + 0.15)
+            : mean < 0.016
+              ? Math.max(base, resolution - 0.1)
+              : resolution;
+        if (Math.abs(next - resolution) > 0.05) {
+          resolution = next;
+          engine.setHardwareScalingLevel(resolution);
+        }
+        qualityElapsed = qualitySum = qualityFrames = 0;
+      }
+      if (now - hudRectsAt > 250) {
+        hudRectsAt = now;
+        hudRects = hudNodes
+          .filter((n) => !n.hidden && n.getClientRects().length)
+          .map((n) => n.getBoundingClientRect());
+      }
       last = now;
       smokeClock += dt;
 
-    // Dissipate tire smoke particles
-    for (const puff of smoke) {
-      if (puff.life > 0) {
-        puff.life -= dt;
-        puff.mesh.position.y += dt * 0.65;
-        puff.mesh.scaling.scaleInPlace(1 + dt * 0.55);
-        puff.mesh.visibility = Math.max(0, puff.life / 1.2);
-        if (puff.life <= 0) puff.mesh.setEnabled(false);
-      }
-    }
-
-    // Animate and bounce spark particles
-    for (const spk of sparks) {
-      if (spk.life > 0) {
-        spk.life -= dt;
-        spk.vy -= 22 * dt; // Gravity
-        spk.mesh.position.x += spk.vx * dt;
-        spk.mesh.position.y += spk.vy * dt;
-        spk.mesh.position.z += spk.vz * dt;
-        if (spk.mesh.position.y < 0.08) {
-          spk.mesh.position.y = 0.08;
-          spk.vy = -spk.vy * 0.38; // Bounce off track
-        }
-        spk.mesh.visibility = Math.max(0, spk.life / 0.5);
-        if (spk.life <= 0) spk.mesh.setEnabled(false);
-      }
-    }
-
-    // Vehicle updates & visual dynamics
-    for (const c of cars.values()) {
-      const t = c.target;
-      if (!t || !c.samples || c.samples.length === 0) continue;
-      const isMine = c.root.name === me;
-      const alpha = 1 - Math.exp(-22 * dt);
-
-      // Adaptive Jitter Buffer: scales dynamically with RTT and packet variance
-      const targetInterpDelay = Math.max(
-        45,
-        Math.min(150, predictionRtt / 2 + 2.0 * jitterStdDev + 25),
-      );
-      smoothInterpDelay +=
-        (targetInterpDelay - smoothInterpDelay) * (1 - Math.exp(-6 * dt));
-      const renderAt = now - smoothInterpDelay;
-      let left = c.samples[0],
-        right = c.samples.at(-1);
-      for (let i = 1; i < c.samples.length; i++) {
-        if (c.samples[i].at >= renderAt) {
-          left = c.samples[i - 1];
-          right = c.samples[i];
-          break;
-        }
-      }
-      const spanMs = Math.max(1, right.at - left.at);
-      const amount = Math.max(0, Math.min(1, (renderAt - left.at) / spanMs));
-      const dtSec = spanMs / 1000;
-
-      // Hermite cubic spline velocity-guided smoothing with tangent clamping
-      const tNorm = amount;
-      const t2 = tNorm * tNorm;
-      const t3 = t2 * tNorm;
-
-      const h00 = 2 * t3 - 3 * t2 + 1;
-      const h10 = t3 - 2 * t2 + tNorm;
-      const h01 = -2 * t3 + 3 * t2;
-      const h11 = t3 - t2;
-
-      let vx0 = (left.vx ?? 0) * dtSec;
-      let vz0 = (left.vz ?? 0) * dtSec;
-      let vx1 = (right.vx ?? 0) * dtSec;
-      let vz1 = (right.vz ?? 0) * dtSec;
-
-      const chordX = right.x - left.x;
-      const chordZ = right.z - left.z;
-      const chordLen = Math.hypot(chordX, chordZ);
-
-      // Clamp velocity tangents against chord displacement to prevent loop-backs or bulging
-      if (chordLen > 0.001) {
-        const uX = chordX / chordLen,
-          uZ = chordZ / chordLen;
-        const dot0 = vx0 * uX + vz0 * uZ;
-        const dot1 = vx1 * uX + vz1 * uZ;
-        if (dot0 < 0) {
-          vx0 = 0;
-          vz0 = 0;
-        } else if (dot0 > chordLen * 2.2) {
-          const s = (chordLen * 2.2) / dot0;
-          vx0 *= s;
-          vz0 *= s;
-        }
-        if (dot1 < 0) {
-          vx1 = 0;
-          vz1 = 0;
-        } else if (dot1 > chordLen * 2.2) {
-          const s = (chordLen * 2.2) / dot1;
-          vx1 *= s;
-          vz1 *= s;
+      // Dissipate tire smoke particles
+      for (const puff of smoke) {
+        if (puff.life > 0) {
+          puff.life -= dt;
+          puff.mesh.position.y += dt * 0.65;
+          puff.mesh.scaling.scaleInPlace(1 + dt * 0.55);
+          puff.mesh.visibility = Math.max(0, puff.life / 1.2);
+          if (puff.life <= 0) puff.mesh.setEnabled(false);
         }
       }
 
-      let targetPosX, targetPosZ;
-      if (
-        !(left.impact > 0.03 || right.impact > 0.03 || t.impact > 0.03) &&
-        (Math.hypot(vx0, vz0) > 0.01 || Math.hypot(vx1, vz1) > 0.01)
-      ) {
-        targetPosX = h00 * left.x + h10 * vx0 + h01 * right.x + h11 * vx1;
-        targetPosZ = h00 * left.z + h10 * vz0 + h01 * right.z + h11 * vz1;
-        // Clamp Hermite overshoot to sample bounds + 0.8m
-        const minX = Math.min(left.x, right.x) - 0.8,
-          maxX = Math.max(left.x, right.x) + 0.8;
-        const minZ = Math.min(left.z, right.z) - 0.8,
-          maxZ = Math.max(left.z, right.z) + 0.8;
-        targetPosX = Math.max(minX, Math.min(maxX, targetPosX));
-        targetPosZ = Math.max(minZ, Math.min(maxZ, targetPosZ));
-      } else {
-        targetPosX = left.x + (right.x - left.x) * tNorm;
-        targetPosZ = left.z + (right.z - left.z) * tNorm;
+      // Animate and bounce spark particles
+      for (const spk of sparks) {
+        if (spk.life > 0) {
+          spk.life -= dt;
+          spk.vy -= 22 * dt; // Gravity
+          spk.mesh.position.x += spk.vx * dt;
+          spk.mesh.position.y += spk.vy * dt;
+          spk.mesh.position.z += spk.vz * dt;
+          if (spk.mesh.position.y < 0.08) {
+            spk.mesh.position.y = 0.08;
+            spk.vy = -spk.vy * 0.38; // Bounce off track
+          }
+          spk.mesh.visibility = Math.max(0, spk.life / 0.5);
+          if (spk.life <= 0) spk.mesh.setEnabled(false);
+        }
       }
-      let targetPosY = left.y + (right.y - left.y) * tNorm;
 
-      // Linear angular interpolation preserves a constant turning rate across packets.
-      const yawDiff = Math.atan2(
-        Math.sin(right.yaw - left.yaw),
-        Math.cos(right.yaw - left.yaw),
-      );
-      const smoothYawT = tNorm;
-      let displayYaw;
-      if (
-        isMine &&
-        currentPhase === "racing" &&
-        t.finished === null &&
-        !localInput.reset &&
-        c.prediction
-      ) {
-        // Zero-latency client prediction for local player
-        const predDt = Math.min(
-          0.05,
-          Math.max(0.001, (now - c.predictedAt) / 1000),
-        );
-        predict(c.prediction, localInput, predDt);
-        c.predictedAt = now;
+      // Vehicle updates & visual dynamics
+      for (const c of cars.values()) {
+        const t = c.target;
+        if (!t || !c.samples || c.samples.length === 0) continue;
+        const isMine = c.root.name === me;
+        const alpha = 1 - Math.exp(-22 * dt);
 
-        if (c.reconcile) {
-          c.reconcile.x *= Math.exp(-12 * dt);
-          c.reconcile.z *= Math.exp(-12 * dt);
+        let left = c.samples[0],
+          right = c.samples.at(-1);
+        for (let i = 1; i < c.samples.length; i++) {
+          if (c.samples[i].at >= renderAt) {
+            left = c.samples[i - 1];
+            right = c.samples[i];
+            break;
+          }
+        }
+        const spanMs = Math.max(1, right.at - left.at);
+        const amount = Math.max(0, Math.min(1, (renderAt - left.at) / spanMs));
+        const dtSec = spanMs / 1000;
+
+        // Hermite cubic spline velocity-guided smoothing with tangent clamping
+        const tNorm = amount;
+        const t2 = tNorm * tNorm;
+        const t3 = t2 * tNorm;
+
+        const h00 = 2 * t3 - 3 * t2 + 1;
+        const h10 = t3 - 2 * t2 + tNorm;
+        const h01 = -2 * t3 + 3 * t2;
+        const h11 = t3 - t2;
+
+        let vx0 = (left.vx ?? 0) * dtSec;
+        let vz0 = (left.vz ?? 0) * dtSec;
+        let vx1 = (right.vx ?? 0) * dtSec;
+        let vz1 = (right.vz ?? 0) * dtSec;
+
+        const chordX = right.x - left.x;
+        const chordZ = right.z - left.z;
+        const chordLen = Math.hypot(chordX, chordZ);
+
+        // Clamp velocity tangents against chord displacement to prevent loop-backs or bulging
+        if (chordLen > 0.001) {
+          const uX = chordX / chordLen,
+            uZ = chordZ / chordLen;
+          const dot0 = vx0 * uX + vz0 * uZ;
+          const dot1 = vx1 * uX + vz1 * uZ;
+          if (dot0 < 0) {
+            vx0 = 0;
+            vz0 = 0;
+          } else if (dot0 > chordLen * 2.2) {
+            const s = (chordLen * 2.2) / dot0;
+            vx0 *= s;
+            vz0 *= s;
+          }
+          if (dot1 < 0) {
+            vx1 = 0;
+            vz1 = 0;
+          } else if (dot1 > chordLen * 2.2) {
+            const s = (chordLen * 2.2) / dot1;
+            vx1 *= s;
+            vz1 *= s;
+          }
         }
 
-        targetPosX = c.prediction.x + (c.reconcile?.x || 0);
-        targetPosY = t.y;
-        targetPosZ = c.prediction.z + (c.reconcile?.z || 0);
-        displayYaw = c.prediction.yaw;
-      } else {
-        // Butter-smooth interpolation for remote cars across packets
+        let targetPosX, targetPosZ;
+        if (
+          !(left.impact > 0.03 || right.impact > 0.03 || t.impact > 0.03) &&
+          (Math.hypot(vx0, vz0) > 0.01 || Math.hypot(vx1, vz1) > 0.01)
+        ) {
+          targetPosX = h00 * left.x + h10 * vx0 + h01 * right.x + h11 * vx1;
+          targetPosZ = h00 * left.z + h10 * vz0 + h01 * right.z + h11 * vz1;
+          // Clamp Hermite overshoot to sample bounds + 0.8m
+          const minX = Math.min(left.x, right.x) - 0.8,
+            maxX = Math.max(left.x, right.x) + 0.8;
+          const minZ = Math.min(left.z, right.z) - 0.8,
+            maxZ = Math.max(left.z, right.z) + 0.8;
+          targetPosX = Math.max(minX, Math.min(maxX, targetPosX));
+          targetPosZ = Math.max(minZ, Math.min(maxZ, targetPosZ));
+        } else {
+          targetPosX = left.x + (right.x - left.x) * tNorm;
+          targetPosZ = left.z + (right.z - left.z) * tNorm;
+        }
+        let targetPosY = left.y + (right.y - left.y) * tNorm;
+
+        // Linear angular interpolation preserves a constant turning rate across packets.
         const yawDiff = Math.atan2(
           Math.sin(right.yaw - left.yaw),
           Math.cos(right.yaw - left.yaw),
         );
-        const targetYaw = left.yaw + yawDiff * tNorm;
-        const sinceLatest = Math.max(0, Math.min(0.08, (renderAt - right.at) / 1000));
-
-        if (sinceLatest > 0 && !(t.impact > 0.05)) {
-          const ahead = {
-            x: targetPosX + (right.vx || 0) * sinceLatest,
-            z: targetPosZ + (right.vz || 0) * sinceLatest,
-          };
-          if (nearest(ahead.x, ahead.z).distance < TRACK.width / 2 - 1.5) {
-            targetPosX = ahead.x;
-            targetPosZ = ahead.z;
+        const smoothYawT = tNorm;
+        let displayYaw;
+        if (
+          isMine &&
+          currentPhase === "racing" &&
+          t.finished === null &&
+          !localInput.reset &&
+          c.prediction &&
+          now - c.samples.at(-1).at < 200 &&
+          !targets.some(
+            (o) => o.id !== t.id && Math.hypot(o.x - t.x, o.z - t.z) < 12,
+          ) &&
+          nearest(t.x, t.z).distance < TRACK.width / 2 - 3 &&
+          !(t.impact > 0.05)
+        ) {
+          // Zero-latency client prediction for local player
+          const age = Math.min(0.05, Math.max(0, (now - c.predictedAt) / 1000));
+          let remaining = age;
+          while (remaining >= 1 / 60) {
+            predict(c.prediction, localInput, 1 / 60);
+            remaining -= 1 / 60;
           }
+          c.predictedAt = now - remaining * 1000;
+
+          if (c.reconcile) {
+            c.reconcile.x *= Math.exp(-12 * dt);
+            c.reconcile.z *= Math.exp(-12 * dt);
+          }
+
+          targetPosX =
+            c.prediction.x +
+            c.prediction.vx * remaining +
+            (c.reconcile?.x || 0);
+          targetPosY = t.y;
+          targetPosZ =
+            c.prediction.z +
+            c.prediction.vz * remaining +
+            (c.reconcile?.z || 0);
+          displayYaw = c.prediction.yaw;
+        } else {
+          // Butter-smooth interpolation for remote cars across packets
+          const yawDiff = Math.atan2(
+            Math.sin(right.yaw - left.yaw),
+            Math.cos(right.yaw - left.yaw),
+          );
+          const targetYaw = left.yaw + yawDiff * tNorm;
+          const sinceLatest = Math.max(
+            0,
+            Math.min(0.08, (renderAt - right.at) / 1000),
+          );
+
+          if (
+            sinceLatest > 0 &&
+            !(t.impact > 0.05) &&
+            !targets.some(
+              (o) => o.id !== t.id && Math.hypot(o.x - t.x, o.z - t.z) < 12,
+            )
+          ) {
+            const ahead = {
+              x: targetPosX + (right.vx || 0) * sinceLatest,
+              z: targetPosZ + (right.vz || 0) * sinceLatest,
+            };
+            if (nearest(ahead.x, ahead.z).distance < TRACK.width / 2 - 1.5) {
+              targetPosX = ahead.x;
+              targetPosZ = ahead.z;
+            }
+          }
+          displayYaw = targetYaw;
         }
-        displayYaw = targetYaw;
-      }
 
-      if (c.recovery) {
-        c.recovery.x *= Math.exp(-12 * dt);
-        c.recovery.z *= Math.exp(-12 * dt);
-        targetPosX += c.recovery.x;
-        targetPosZ += c.recovery.z;
-      }
-      c.root.position.set(targetPosX, targetPosY, targetPosZ);
-      c.root.rotation.y = displayYaw;
+        if (c.recovery) {
+          c.recovery.x *= Math.exp(-12 * dt);
+          c.recovery.z *= Math.exp(-12 * dt);
+          targetPosX += c.recovery.x;
+          targetPosZ += c.recovery.z;
+        }
+        c.root.position.set(targetPosX, targetPosY, targetPosZ);
+        c.root.rotation.y = displayYaw;
 
-      // Update 3D spatialized opponent engine audio
-      if (
-        audioSystem &&
-        !isMine &&
-        currentPhase === "racing" &&
-        t.finished === null
-      ) {
-        try {
-          audioSystem.updateRemoteCar(
-            c.root.name,
-            c.root.position,
-            camera.position,
-            t.speed || 0,
-            !!t.throttle,
-            { x: t.vx || 0, z: t.vz || 0 },
-            { x: cameraVel.x || 0, z: cameraVel.z || 0 },
-          );
-        } catch {}
-      } else if (!isMine) audioSystem?.removeRemoteCar(c.root.name);
+        // Update 3D spatialized opponent engine audio
+        if (
+          audioSystem &&
+          !isMine &&
+          currentPhase === "racing" &&
+          t.finished === null
+        ) {
+          try {
+            audioSystem.updateRemoteCar(
+              c.root.name,
+              c.root.position,
+              camera.position,
+              t.speed || 0,
+              !!t.throttle,
+              { x: t.vx || 0, z: t.vz || 0 },
+              { x: cameraVel.x || 0, z: cameraVel.z || 0 },
+            );
+          } catch {}
+        } else if (!isMine) audioSystem?.removeRemoteCar(c.root.name);
 
-      // Active brake lights and glowing carbon discs
-      c.brakeLights.forEach((light) => light.setEnabled(!!t.braking));
-      if (t.braking && t.speed > 10) {
-        c.brakeHeat = Math.min(1, c.brakeHeat + dt * 3.2);
-      } else {
-        c.brakeHeat = Math.max(0, c.brakeHeat - dt * 1.8);
-      }
-      const discMat = c.brakeHeat > 0.35 ? brakeDiscHot : brakeDiscCold;
-      c.brakeDiscs.forEach((d) => (d.material = discMat));
+        // Active brake lights and glowing carbon discs
+        c.brakeLights.forEach((light) => light.setEnabled(!!t.braking));
+        if (t.braking && t.speed > 10) {
+          c.brakeHeat = Math.min(1, c.brakeHeat + dt * 3.2);
+        } else {
+          c.brakeHeat = Math.max(0, c.brakeHeat - dt * 1.8);
+        }
+        const discMat = c.brakeHeat > 0.35 ? brakeDiscHot : brakeDiscCold;
+        c.brakeDiscs.forEach((d) => (d.material = discMat));
 
-      // Responsive steering: zero latency visual turn-in
-      const rawSteerInput =
-        (localInput.left ? -1 : 0) + (localInput.right ? 1 : 0);
-      if (isMine) {
-        localSteerAngle +=
-          (rawSteerInput - localSteerAngle) * (1 - Math.exp(-32 * dt));
-      }
-      const visualSteer = isMine ? localSteerAngle : t.steer;
+        // Responsive steering: zero latency visual turn-in
+        const rawSteerInput =
+          (localInput.left ? -1 : 0) + (localInput.right ? 1 : 0);
+        if (isMine) {
+          localSteerAngle +=
+            (rawSteerInput - localSteerAngle) * (1 - Math.exp(-32 * dt));
+        }
+        const visualSteer = isMine ? localSteerAngle : t.steer;
 
-      // Tire smoke on heavy drift or braking
-      if (t.drift && t.speed > 8 && smokeClock > 0.035) {
-        const puff = smoke[smokeCursor++ % smoke.length];
-        puff.life = 1.1;
-        puff.mesh.setEnabled(true);
-        puff.mesh.position.copyFrom(c.root.position);
-        puff.mesh.position.x -= Math.sin(c.root.rotation.y) * 1.7;
-        puff.mesh.position.z -= Math.cos(c.root.rotation.y) * 1.7;
-        puff.mesh.position.y = 0.28;
-        puff.mesh.scaling.setAll(0.65);
-        smokeClock = 0;
-      }
+        // Tire smoke on heavy drift or braking
+        if (t.drift && t.speed > 8 && smokeClock > 0.035) {
+          const puff = smoke[smokeCursor++ % smoke.length];
+          puff.life = 1.1;
+          puff.mesh.setEnabled(true);
+          puff.mesh.position.copyFrom(c.root.position);
+          puff.mesh.position.x -= Math.sin(c.root.rotation.y) * 1.7;
+          puff.mesh.position.z -= Math.cos(c.root.rotation.y) * 1.7;
+          puff.mesh.position.y = 0.28;
+          puff.mesh.scaling.setAll(0.65);
+          smokeClock = 0;
+        }
 
-      // Spark bursts on physical impact
-      if (t.impact > (c.lastImpact || 0) + 0.06) {
-        emitSparks(
-          c.root.position.x,
-          c.root.position.y + 0.25,
-          c.root.position.z,
-          Math.floor(t.impact * 12),
-          1.2,
-        );
-      }
-
-      c.lastImpact = t.impact || 0;
-      // Dynamic suspension pitch (squat on gas, dive on brake) and roll into turns
-      const targetPitch = (t.throttle ? 0.022 : 0) - (t.braking ? 0.038 : 0);
-      const targetRoll = -visualSteer * Math.min(1, t.speed / 24) * 0.075;
-      c.chassis.rotation.x += (targetPitch - c.chassis.rotation.x) * alpha;
-      c.chassis.rotation.z += (targetRoll - c.chassis.rotation.z) * alpha;
-
-      // Authentic kerb chassis micro-vibration
-      const trackDist = nearest(targetPosX, targetPosZ).distance;
-      const onKerbZone = trackDist >= 9.8 && trackDist <= 11.6;
-      if (onKerbZone && (t.speed || 0) > 7) {
-        c.chassis.position.y =
-          0.28 +
-          Math.sin(now * 0.055) *
-            Math.min(0.022, ((t.speed || 0) / 45) * 0.022);
-      } else {
-        c.chassis.position.y += (0.28 - c.chassis.position.y) * alpha;
-      }
-
-      // Wheel spinning & Ackermann steering geometry
-      for (const w of c.wheels) {
-        w.wheel.rotation.x += (t.speed * dt) / 0.38;
-        const steerTarget = w.front ? visualSteer * 0.34 : 0;
-        w.pivot.rotation.y += (steerTarget - w.pivot.rotation.y) * alpha;
-      }
-    }
-
-    // Emit contact sparks on physical car-to-car touch without jittering mesh coordinates
-    const visible = [...cars.values()];
-    for (let i = 0; i < visible.length; i++) {
-      for (let j = i + 1; j < visible.length; j++) {
-        const a = visible[i].root,
-          b = visible[j].root,
-          hit = overlap(
-            { x: a.position.x, z: a.position.z, yaw: a.rotation.y },
-            { x: b.position.x, z: b.position.z, yaw: b.rotation.y },
-          );
-        if (hit && Math.random() < 0.25) {
+        // Spark bursts on physical impact
+        if (t.impact > (c.lastImpact || 0) + 0.06) {
           emitSparks(
-            (a.position.x + b.position.x) * 0.5,
-            0.3,
-            (a.position.z + b.position.z) * 0.5,
-            6,
-            0.8,
+            c.root.position.x,
+            c.root.position.y + 0.25,
+            c.root.position.z,
+            Math.floor(t.impact * 12),
+            1.2,
           );
         }
+
+        c.lastImpact = t.impact || 0;
+        // Dynamic suspension pitch (squat on gas, dive on brake) and roll into turns
+        const acceleration = Math.max(
+          -40,
+          Math.min(
+            30,
+            (t.speed - (c.lastSpeed ?? t.speed)) / Math.max(0.016, dt),
+          ),
+        );
+        c.lastSpeed = t.speed;
+        c.load =
+          (c.load || 0) +
+          (acceleration - (c.load || 0)) * (1 - Math.exp(-7 * dt));
+        const targetPitch = c.load * 0.0015;
+        const targetRoll = -visualSteer * Math.min(1, t.speed / 24) * 0.06;
+        c.chassis.rotation.x += (targetPitch - c.chassis.rotation.x) * alpha;
+        c.chassis.rotation.z += (targetRoll - c.chassis.rotation.z) * alpha;
+
+        // Authentic kerb chassis micro-vibration
+        const trackDist = nearest(targetPosX, targetPosZ).distance;
+        const onKerbZone = trackDist >= 9.8 && trackDist <= 11.6;
+        if (onKerbZone && (t.speed || 0) > 7) {
+          c.chassis.position.y =
+            0.28 +
+            Math.sin(now * 0.055) *
+              Math.min(0.022, ((t.speed || 0) / 45) * 0.022);
+        } else {
+          c.chassis.position.y += (0.28 - c.chassis.position.y) * alpha;
+        }
+
+        // Wheel spinning & Ackermann steering geometry
+        for (const w of c.wheels) {
+          const forwardSpeed =
+            (t.vx || 0) * Math.sin(t.yaw) + (t.vz || 0) * Math.cos(t.yaw);
+          w.wheel.rotation.x =
+            (w.wheel.rotation.x + (forwardSpeed * dt) / 0.38) % (Math.PI * 2);
+          const steerTarget = w.front ? visualSteer * 0.34 : 0;
+          w.pivot.rotation.y += (steerTarget - w.pivot.rotation.y) * alpha;
+          const compression = Math.max(
+            -0.045,
+            Math.min(
+              0.045,
+              (w.front ? -1 : 1) * c.load * 0.001 +
+                Math.sign(w.pivot.position.x) * targetRoll * 0.4,
+            ),
+          );
+          w.pivot.position.y +=
+            (-0.05 + compression - w.pivot.position.y) *
+            (1 - Math.exp(-12 * dt));
+        }
       }
+
+      // A shared delayed contact timeline is primary; project residual interpolation overlap.
+      const visible = [...cars.values()];
+      for (let pass = 0; pass < 8; pass++) {
+        for (let i = 0; i < visible.length; i++)
+          for (let j = i + 1; j < visible.length; j++) {
+            const a = visible[i].root,
+              b = visible[j].root;
+            const hit = overlap(
+              { x: a.position.x, z: a.position.z, yaw: a.rotation.y },
+              { x: b.position.x, z: b.position.z, yaw: b.rotation.y },
+            );
+            if (hit) {
+              const d = (hit.depth + 0.002) / 2;
+              a.position.x -= hit.x * d;
+              a.position.z -= hit.z * d;
+              b.position.x += hit.x * d;
+              b.position.z += hit.z * d;
+            }
+          }
+        for (const c of visible) {
+          const p = c.root.position,
+            f = point(nearest(p.x, p.z).s),
+            nx = Math.cos(f.yaw),
+            nz = -Math.sin(f.yaw),
+            rel = c.root.rotation.y - f.yaw;
+          const limit =
+            TRACK.width / 2 -
+            1.28 * Math.abs(Math.cos(rel)) -
+            2.3 * Math.abs(Math.sin(rel)) -
+            0.03;
+          const side = (p.x - f.x) * nx + (p.z - f.z) * nz,
+            excess = side - Math.max(-limit, Math.min(limit, side));
+          p.x -= nx * excess;
+          p.z -= nz * excess;
+        }
+      }
+
+      // Dynamic Chase Camera with look-ahead and speed FOV (ultra-stable 1fc22f6 geometry)
+      const mine = cars.get(me);
+      if (racing && mine && mine.target) {
+        const p = mine.root.position,
+          yaw = mine.root.rotation.y,
+          speed = Number.isFinite(mine.target.speed)
+            ? Math.max(0, mine.target.speed)
+            : 0;
+
+        // Smooth chase camera distance and height inspired by the solid 1fc22f6 feel
+        const camDist = 13.5 + Math.min(2.5, speed * 0.04);
+        const camHeight = 5.2 + Math.min(0.8, speed * 0.02);
+
+        const px = Number.isFinite(p.x) ? p.x : 120;
+        const py = Number.isFinite(p.y) ? p.y : 0.55;
+        const pz = Number.isFinite(p.z) ? p.z : 0;
+        const safeYaw = Number.isFinite(yaw) ? yaw : 0;
+
+        const desired = new Vector3(
+          px - Math.sin(safeYaw) * camDist,
+          py + camHeight,
+          pz - Math.cos(safeYaw) * camDist,
+        );
+
+        const prevCamX = camera.position.x;
+        const prevCamZ = camera.position.z;
+
+        camera.position = Vector3.Lerp(
+          camera.position,
+          desired,
+          1 - Math.exp(-8 * dt),
+        );
+
+        // Validate camera.position sanity
+        if (
+          !Number.isFinite(camera.position.x) ||
+          !Number.isFinite(camera.position.y) ||
+          !Number.isFinite(camera.position.z)
+        ) {
+          camera.position.copyFrom(desired);
+        }
+
+        cameraVel.x = (camera.position.x - prevCamX) / dt;
+        cameraVel.z = (camera.position.z - prevCamZ) / dt;
+
+        // Look-ahead target anticipates corners
+        const lookDist = 7.5 + Math.min(5.0, speed * 0.1);
+        const lookTarget = new Vector3(
+          px + Math.sin(safeYaw) * lookDist,
+          py + 1.25,
+          pz + Math.cos(safeYaw) * lookDist,
+        );
+        if (Vector3.DistanceSquared(camera.position, lookTarget) > 0.01) {
+          Vector3.LerpToRef(
+            lookSpring,
+            lookTarget,
+            1 - Math.exp(-10 * dt),
+            lookSpring,
+          );
+          camera.setTarget(lookSpring);
+        }
+
+        // Speed FOV expansion (intense tunnel vision at top speed, clamped safely)
+        const targetFov = 0.82 + Math.min(0.12, (speed / 50) * 0.12);
+        camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-6 * dt));
+        camera.fov = Math.max(
+          0.7,
+          Math.min(0.98, Number.isFinite(camera.fov) ? camera.fov : 0.82),
+        );
+      } else {
+        // Cinematic orbit in lobby / results
+        const t = now * 0.00015;
+        camera.fov += (0.82 - camera.fov) * (1 - Math.exp(-4 * dt));
+        Vector3.LerpToRef(
+          camera.position,
+          new Vector3(120 + Math.sin(t) * 75, 55, Math.cos(t) * 75),
+          1 - Math.exp(-2 * dt),
+          camera.position,
+        );
+        Vector3.LerpToRef(
+          lookSpring,
+          new Vector3(120, 2, 0),
+          1 - Math.exp(-3 * dt),
+          lookSpring,
+        );
+        camera.setTarget(lookSpring);
+        cameraVel.set(0, 0, 0);
+      }
+
+      try {
+        const fwd = camera.getTarget().subtract(camera.position);
+        const fwdLen = fwd.length();
+        if (fwdLen > 0.001) {
+          fwd.scaleInPlace(1 / fwdLen);
+          audioSystem?.listener(camera.position, fwd);
+        }
+      } catch {}
+      const renderStart = performance.now(),
+        drawStart = engine._drawCalls?.current || 0;
+      scene.render();
+      renderMs = performance.now() - renderStart;
+      drawCalls = Math.max(0, (engine._drawCalls?.current || 0) - drawStart);
+
+      // Floating broadcast driver tags: positioned safely above car (+2.65m)
+      const occupied = [];
+      const viewport = camera.viewport.toGlobal(
+        engine.getRenderWidth(),
+        engine.getRenderHeight(),
+      );
+      const camTarget = camera.getTarget();
+      const camForwardX = camTarget.x - camera.position.x;
+      const camForwardZ = camTarget.z - camera.position.z;
+      const camForwardLen = Math.hypot(camForwardX, camForwardZ);
+      const normForwardX =
+        camForwardLen > 1e-4 ? camForwardX / camForwardLen : 0;
+      const normForwardZ =
+        camForwardLen > 1e-4 ? camForwardZ / camForwardLen : 1;
+      const transformMatrix = scene.getTransformMatrix();
+
+      for (const c of [...cars.values()].sort(
+        (a, b) =>
+          Vector3.DistanceSquared(a.root.position, camera.position) -
+          Vector3.DistanceSquared(b.root.position, camera.position),
+      )) {
+        const isMine = c.root.name === me;
+        if (!racing || currentPhase === "results" || isMine) {
+          c.label.hidden = true;
+          continue;
+        }
+        const toCarX = c.root.position.x - camera.position.x;
+        const toCarZ = c.root.position.z - camera.position.z;
+        const dotForward = toCarX * normForwardX + toCarZ * normForwardZ;
+        if (dotForward < 1.0) {
+          c.label.hidden = true;
+          continue;
+        }
+
+        scratchAnchor.set(
+          c.root.position.x,
+          c.root.position.y + 2.65,
+          c.root.position.z,
+        );
+        const projected = Vector3.Project(
+          scratchAnchor,
+          identityMatrix,
+          transformMatrix,
+          viewport,
+        );
+        const distance = Math.max(
+          0.01,
+          Vector3.Distance(scratchAnchor, camera.position),
+        );
+        const renderW = Math.max(1, engine.getRenderWidth());
+        const renderH = Math.max(1, engine.getRenderHeight());
+        const x = (projected.x / renderW) * innerWidth,
+          y = (projected.y / renderH) * innerHeight;
+        const hidden =
+          projected.z < 0 ||
+          projected.z > 1 ||
+          distance < 4.5 ||
+          distance > 150 ||
+          x < 80 ||
+          x > innerWidth - 80 ||
+          y < 120 ||
+          y > innerHeight - 80 ||
+          hudRects.some(
+            (r) =>
+              x + 85 > r.left &&
+              x - 85 < r.right &&
+              y > r.top &&
+              y - 34 < r.bottom,
+          ) ||
+          occupied.some(
+            (p) => Math.abs(p.x - x) < 140 && Math.abs(p.y - y) < 32,
+          );
+        c.label.hidden = hidden;
+        if (!hidden) {
+          occupied.push({ x, y });
+          const scale = Math.max(0.72, Math.min(1.05, 26 / distance));
+          c.label.style.transform = `translate(-50%,-100%) translate(${x.toFixed(1)}px,${y.toFixed(1)}px) scale(${scale.toFixed(2)})`;
+          c.label.style.opacity = String(Math.min(1, (150 - distance) / 25));
+        }
+      }
+    } catch (err) {
+      failedFrames++;
+      if (failedFrames === 1) console.error("Render loop failure:", err);
     }
+  });
 
-    // Dynamic Chase Camera with look-ahead and speed FOV (ultra-stable 1fc22f6 geometry)
-    const mine = cars.get(me);
-    if (racing && mine && mine.target) {
-      const p = mine.root.position,
-        yaw = mine.root.rotation.y,
-        speed = Number.isFinite(mine.target.speed) ? Math.max(0, mine.target.speed) : 0;
-
-      // Smooth chase camera distance and height inspired by the solid 1fc22f6 feel
-      const camDist = 13.5 + Math.min(2.5, speed * 0.04);
-      const camHeight = 5.2 + Math.min(0.8, speed * 0.02);
-
-      const px = Number.isFinite(p.x) ? p.x : 120;
-      const py = Number.isFinite(p.y) ? p.y : 0.55;
-      const pz = Number.isFinite(p.z) ? p.z : 0;
-      const safeYaw = Number.isFinite(yaw) ? yaw : 0;
-
-      const desired = new Vector3(
-        px - Math.sin(safeYaw) * camDist,
-        py + camHeight,
-        pz - Math.cos(safeYaw) * camDist,
-      );
-
-      const prevCamX = camera.position.x;
-      const prevCamZ = camera.position.z;
-
-      camera.position = Vector3.Lerp(
-        camera.position,
-        desired,
-        1 - Math.exp(-8 * dt),
-      );
-
-      // Validate camera.position sanity
-      if (
-        !Number.isFinite(camera.position.x) ||
-        !Number.isFinite(camera.position.y) ||
-        !Number.isFinite(camera.position.z)
-      ) {
-        camera.position.copyFrom(desired);
-      }
-
-      cameraVel.x = (camera.position.x - prevCamX) / dt;
-      cameraVel.z = (camera.position.z - prevCamZ) / dt;
-
-      // Look-ahead target anticipates corners
-      const lookDist = 7.5 + Math.min(5.0, speed * 0.1);
-      const lookTarget = new Vector3(
-        px + Math.sin(safeYaw) * lookDist,
-        py + 1.25,
-        pz + Math.cos(safeYaw) * lookDist,
-      );
-      if (Vector3.DistanceSquared(camera.position, lookTarget) > 0.01) {
-        camera.setTarget(lookTarget);
-      }
-
-      // Speed FOV expansion (intense tunnel vision at top speed, clamped safely)
-      const targetFov = 0.82 + Math.min(0.12, (speed / 50) * 0.12);
-      camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-6 * dt));
-      camera.fov = Math.max(
-        0.7,
-        Math.min(0.98, Number.isFinite(camera.fov) ? camera.fov : 0.82),
-      );
-    } else {
-      // Cinematic orbit in lobby / results
-      const t = now * 0.00015;
-      camera.fov = 0.82;
-      camera.position.set(120 + Math.sin(t) * 75, 55, Math.cos(t) * 75);
-      camera.setTarget(new Vector3(120, 2, 0));
-      cameraVel.set(0, 0, 0);
-    }
-
-    try {
-      const fwd = camera.getTarget().subtract(camera.position);
-      const fwdLen = fwd.length();
-      if (fwdLen > 0.001) {
-        fwd.scaleInPlace(1 / fwdLen);
-        audioSystem?.listener(camera.position, fwd);
-      }
-    } catch {}
-    scene.render();
-
-    // Floating broadcast driver tags: positioned safely above car (+2.65m)
-    const occupied = [];
-    const viewport = camera.viewport.toGlobal(
-      engine.getRenderWidth(),
-      engine.getRenderHeight(),
-    );
-    const camTarget = camera.getTarget();
-    const camForwardX = camTarget.x - camera.position.x;
-    const camForwardZ = camTarget.z - camera.position.z;
-    const camForwardLen = Math.hypot(camForwardX, camForwardZ);
-    const normForwardX = camForwardLen > 1e-4 ? camForwardX / camForwardLen : 0;
-    const normForwardZ = camForwardLen > 1e-4 ? camForwardZ / camForwardLen : 1;
-    const transformMatrix = scene.getTransformMatrix();
-
-    for (const c of [...cars.values()].sort(
-      (a, b) =>
-        Vector3.DistanceSquared(a.root.position, camera.position) -
-        Vector3.DistanceSquared(b.root.position, camera.position),
-    )) {
-      const isMine = c.root.name === me;
-      if (!racing || currentPhase === "results" || isMine) {
-        c.label.hidden = true;
-        continue;
-      }
-      const toCarX = c.root.position.x - camera.position.x;
-      const toCarZ = c.root.position.z - camera.position.z;
-      const dotForward = toCarX * normForwardX + toCarZ * normForwardZ;
-      if (dotForward < 1.0) {
-        c.label.hidden = true;
-        continue;
-      }
-
-      scratchAnchor.set(
-        c.root.position.x,
-        c.root.position.y + 2.65,
-        c.root.position.z,
-      );
-      const projected = Vector3.Project(
-        scratchAnchor,
-        identityMatrix,
-        transformMatrix,
-        viewport,
-      );
-      const distance = Math.max(
-        0.01,
-        Vector3.Distance(scratchAnchor, camera.position),
-      );
-      const renderW = Math.max(1, engine.getRenderWidth());
-      const renderH = Math.max(1, engine.getRenderHeight());
-      const x = (projected.x / renderW) * innerWidth,
-        y = (projected.y / renderH) * innerHeight;
-      const hidden =
-        projected.z < 0 ||
-        projected.z > 1 ||
-        distance < 4.5 ||
-        distance > 150 ||
-        x < 80 ||
-        x > innerWidth - 80 ||
-        y < 120 ||
-        y > innerHeight - 80 ||
-        occupied.some((p) => Math.abs(p.x - x) < 140 && Math.abs(p.y - y) < 32);
-      c.label.hidden = hidden;
-      if (!hidden) {
-        occupied.push({ x, y });
-        const scale = Math.max(0.72, Math.min(1.05, 26 / distance));
-        c.label.style.transform = `translate(-50%,-100%) translate(${x.toFixed(1)}px,${y.toFixed(1)}px) scale(${scale.toFixed(2)})`;
-        c.label.style.opacity = String(Math.min(1, (150 - distance) / 25));
-      }
-    }
-  } catch (err) {
-    console.warn("Render loop error handled safely:", err);
-  }
-});
-
-  window.addEventListener("resize", () => engine.resize());
+  const resize = () => engine.resize();
+  window.addEventListener("resize", resize);
 
   return {
     update,
+    metrics: () => {
+      const values = Array.from(
+        frameTimes.slice(0, Math.min(frameCount, 360)),
+      ).sort((a, b) => a - b);
+      return {
+        frames: frameCount,
+        failedFrames,
+        meanFrameMs:
+          values.reduce((a, b) => a + b, 0) / Math.max(1, values.length),
+        p95FrameMs: values[Math.floor(values.length * 0.95)] || 0,
+        renderMs,
+        drawCalls,
+        meshes: scene.meshes.length,
+        activeMeshes: scene.getActiveMeshes().length,
+        materials: scene.materials.length,
+        textures: scene.textures.length,
+        interpolationMs: smoothInterpDelay,
+        quality: qualityLevel,
+        resolution,
+        poses: [...cars.values()].map((c) => ({
+          id: c.root.name,
+          x: c.root.position.x,
+          z: c.root.position.z,
+          yaw: c.root.rotation.y,
+        })),
+      };
+    },
+    dispose: () => {
+      window.removeEventListener("resize", resize);
+      for (const c of cars.values()) c.dispose();
+      cars.clear();
+      engine.stopRenderLoop();
+      scene.dispose();
+      engine.dispose();
+    },
     input: (keys, history = []) => {
       localInput = { ...keys };
       inputHistory = history;
@@ -1751,7 +1943,11 @@ export function createScene(canvas, audioSystem = null) {
       jitterStdDev = stdDev;
     },
     quality: (level) => {
-      engine.setHardwareScalingLevel([2, 1.5, 1][level]);
+      if (!Number.isInteger(level) || level < 0 || level > 3) return;
+      qualityLevel = level;
+      resolution = qualityScales[level];
+      qualityElapsed = qualitySum = qualityFrames = 0;
+      engine.setHardwareScalingLevel(resolution);
       if (shadowGen) {
         if (level === 0) {
           scene.shadowsEnabled = false;

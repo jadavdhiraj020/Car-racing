@@ -1,9 +1,21 @@
+import { AmbientMusic } from "./music.js";
 // Professional Web Audio API Procedural F1 Racing Audio Synthesizer
 // Pure procedural synthesis - zero external audio assets required
 
 export class EngineAudio {
   constructor() {
     this.ctx = null;
+    this.nodes = new Set();
+    this.sources = new Set();
+    this.timers = new Set();
+    this.volumes = { master: 0.8, engine: 0.8, music: 0.22, sfx: 0.7 };
+    this.phase = "home";
+    this.suspended = false;
+    this.output = null;
+    this.engineBus = null;
+    this.sfxBus = null;
+    this.musicBus = null;
+    this.impactLevel = 0;
     this.master = null;
     this.effects = null;
 
@@ -48,10 +60,140 @@ export class EngineAudio {
     this.remoteCars = new Map();
   }
 
+  track(node) {
+    this.nodes.add(node);
+    const disconnect = node.disconnect.bind(node);
+    node.disconnect = (...args) => {
+      if (args.length === 0) this.nodes.delete(node);
+      return disconnect(...args);
+    };
+    if (typeof node.start === "function") {
+      this.sources.add(node);
+      node.addEventListener("ended", () => {
+        this.sources.delete(node);
+        node.disconnect();
+      });
+    }
+    return node;
+  }
+  later(fn, ms) {
+    const id = setTimeout(() => {
+      this.timers.delete(id);
+      fn();
+    }, ms);
+    this.timers.add(id);
+    return id;
+  }
+  setVolumes(values) {
+    for (const key of Object.keys(this.volumes))
+      if (Number.isFinite(values[key]))
+        this.volumes[key] = Math.max(0, Math.min(1, values[key]));
+    this.applyMix();
+  }
+  applyMix() {
+    if (!this.ctx || !this.output) return;
+    const t = this.ctx.currentTime;
+    this.output.gain.setTargetAtTime(
+      this.enabled && !this.suspended ? this.volumes.master : 0,
+      t,
+      0.04,
+    );
+    this.engineBus.gain.setTargetAtTime(this.volumes.engine, t, 0.04);
+    this.sfxBus.gain.setTargetAtTime(this.volumes.sfx, t, 0.04);
+    this.musicBus.gain.setTargetAtTime(
+      this.volumes.music * (this.phase === "racing" ? 0.35 : 1),
+      t,
+      0.35,
+    );
+  }
+  setPhase(phase) {
+    if (phase === this.phase) return;
+    this.phase = phase;
+    this.cancelEffects();
+    this.gear = 1;
+    this.rpm = this.idleRpm;
+    this.boost = 0;
+    this.impactLevel = 0;
+    for (const id of [...this.remoteCars.keys()]) this.removeRemoteCar(id);
+    this.applyMix();
+  }
+  cancelEffects() {
+    for (const id of this.timers) clearTimeout(id);
+    this.timers.clear();
+    if (this.effects && this.ctx) {
+      this.effects.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.effects.gain.setTargetAtTime(0, this.ctx.currentTime, 0.01);
+    }
+    const keep = new Set([
+      ...(this.continuous || []),
+      ...[...this.remoteCars.values()].map((n) => n.osc),
+      ...[...(this.music?.voices || [])].map((v) => v.osc),
+    ]);
+    for (const source of this.sources)
+      if (!keep.has(source)) {
+        try {
+          source.stop(this.ctx.currentTime + 0.025);
+        } catch {}
+      }
+  }
+  setSuspended(value) {
+    this.suspended = !!value;
+    if (value) {
+      this.cancelEffects();
+      this.music?.stop();
+    } else if (this.enabled) this.music?.start();
+    this.applyMix();
+  }
+  metrics() {
+    return {
+      nodes: this.nodes.size,
+      sources: this.sources.size,
+      remoteCars: this.remoteCars.size,
+      timers: this.timers.size,
+      musicVoices: this.music?.voices.size || 0,
+      musicRunning: this.music?.running || false,
+      volumes: { ...this.volumes },
+      enabled: this.enabled,
+      suspended: this.suspended,
+    };
+  }
+  async dispose() {
+    this.enabled = false;
+    this.music?.dispose();
+    this.cancelEffects();
+    for (const source of this.sources) {
+      try {
+        source.stop();
+      } catch {}
+    }
+    for (const node of [...this.nodes]) {
+      try {
+        node.disconnect();
+      } catch {}
+    }
+    this.sources.clear();
+    this.nodes.clear();
+    this.remoteCars.clear();
+    this.music = null;
+    const ctx = this.ctx;
+    this.ctx = null;
+    if (ctx && ctx.state !== "closed") await ctx.close();
+  }
   async init() {
+    try {
+      await this.initialize();
+    } catch (error) {
+      await this.dispose();
+      throw error;
+    }
+  }
+  async initialize() {
     if (this.ctx) {
       if (this.ctx.state === "suspended") await this.ctx.resume();
       this.enabled = true;
+      this.suspended = false;
+      this.music?.start();
+      this.applyMix();
       return;
     }
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -60,24 +202,33 @@ export class EngineAudio {
     this.ctx = ctx;
 
     // Master bus with multiband limiting
-    const limiter = ctx.createDynamicsCompressor();
+    const limiter = this.track(ctx.createDynamicsCompressor());
     limiter.threshold.value = -12;
     limiter.knee.value = 8;
     limiter.ratio.value = 10;
     limiter.attack.value = 0.002;
     limiter.release.value = 0.12;
-    limiter.connect(ctx.destination);
+    this.output = this.track(ctx.createGain());
+    this.output.gain.value = 0;
+    this.output.connect(ctx.destination);
+    limiter.connect(this.output);
+    this.engineBus = this.track(ctx.createGain());
+    this.engineBus.connect(limiter);
+    this.sfxBus = this.track(ctx.createGain());
+    this.sfxBus.connect(limiter);
+    this.musicBus = this.track(ctx.createGain());
+    this.musicBus.connect(limiter);
 
-    this.master = ctx.createGain();
+    this.master = this.track(ctx.createGain());
     this.master.gain.value = 0.55;
-    this.master.connect(limiter);
+    this.master.connect(this.engineBus);
 
-    this.effects = ctx.createGain();
+    this.effects = this.track(ctx.createGain());
     this.effects.gain.value = 0.5;
-    this.effects.connect(limiter);
+    this.effects.connect(this.sfxBus);
 
     // Engine exhaust distortion wave shaper for aggressive F1 rasp
-    this.exhaustShaper = ctx.createWaveShaper();
+    this.exhaustShaper = this.track(ctx.createWaveShaper());
     const curve = new Float32Array(512);
     for (let i = 0; i < 512; i++) {
       const x = (i * 2) / 512 - 1;
@@ -86,18 +237,18 @@ export class EngineAudio {
     this.exhaustShaper.curve = curve;
 
     // Screamer resonance filter (F1 tuned exhaust header acoustic formant)
-    this.screamerFilter = ctx.createBiquadFilter();
+    this.screamerFilter = this.track(ctx.createBiquadFilter());
     this.screamerFilter.type = "bandpass";
     this.screamerFilter.frequency.value = 1800;
     this.screamerFilter.Q.value = 2.4;
 
     // Intake throat lowpass filter
-    this.intakeFilter = ctx.createBiquadFilter();
+    this.intakeFilter = this.track(ctx.createBiquadFilter());
     this.intakeFilter.type = "lowpass";
     this.intakeFilter.frequency.value = 1200;
     this.intakeFilter.Q.value = 2.0;
 
-    this.engineGain = ctx.createGain();
+    this.engineGain = this.track(ctx.createGain());
     this.engineGain.gain.value = 0.4;
 
     // Route engine oscillators:
@@ -109,43 +260,43 @@ export class EngineAudio {
     this.engineGain.connect(this.master);
 
     // 1. Sub-bass fundamental (chassis shudder)
-    this.subOsc = ctx.createOscillator();
+    this.subOsc = this.track(ctx.createOscillator());
     this.subOsc.type = "sawtooth";
-    this.subGain = ctx.createGain();
+    this.subGain = this.track(ctx.createGain());
     this.subGain.gain.value = 0.32;
     this.subOsc.connect(this.subGain);
     this.subGain.connect(this.intakeFilter);
 
     // 2. Mid harmonic combustion growl (2nd & 3rd harmonics)
-    this.midOsc = ctx.createOscillator();
+    this.midOsc = this.track(ctx.createOscillator());
     this.midOsc.type = "sawtooth";
-    this.midGain = ctx.createGain();
+    this.midGain = this.track(ctx.createGain());
     this.midGain.gain.value = 0.45;
     this.midOsc.connect(this.midGain);
     this.midGain.connect(this.intakeFilter);
 
     // 3. High-RPM screamer harmonic (high pulse wave)
-    this.highOsc = ctx.createOscillator();
+    this.highOsc = this.track(ctx.createOscillator());
     this.highOsc.type = "triangle";
-    this.highGain = ctx.createGain();
+    this.highGain = this.track(ctx.createGain());
     this.highGain.gain.value = 0.35;
     this.highOsc.connect(this.highGain);
     this.highGain.connect(this.intakeFilter);
 
     // 4. Combustion cylinder rasp (sharp sawtooth 4th harmonic)
-    this.raspOsc = ctx.createOscillator();
+    this.raspOsc = this.track(ctx.createOscillator());
     this.raspOsc.type = "sawtooth";
-    this.raspGain = ctx.createGain();
+    this.raspGain = this.track(ctx.createGain());
     this.raspGain.gain.value = 0.28;
     this.raspOsc.connect(this.raspGain);
     this.raspGain.connect(this.intakeFilter);
 
     // 5. Turbocharger spool whistle
-    this.turboOsc = ctx.createOscillator();
+    this.turboOsc = this.track(ctx.createOscillator());
     this.turboOsc.type = "sine";
-    this.turboGain = ctx.createGain();
+    this.turboGain = this.track(ctx.createGain());
     this.turboGain.gain.value = 0.0;
-    this.turboFilter = ctx.createBiquadFilter();
+    this.turboFilter = this.track(ctx.createBiquadFilter());
     this.turboFilter.type = "bandpass";
     this.turboFilter.frequency.value = 3200;
     this.turboFilter.Q.value = 4.0;
@@ -154,11 +305,11 @@ export class EngineAudio {
     this.turboGain.connect(this.master);
 
     // 5b. MGU-K / MGU-H hybrid electric boost spool whine
-    this.mguOsc = ctx.createOscillator();
+    this.mguOsc = this.track(ctx.createOscillator());
     this.mguOsc.type = "sine";
-    this.mguGain = ctx.createGain();
+    this.mguGain = this.track(ctx.createGain());
     this.mguGain.gain.value = 0.0;
-    this.mguFilter = ctx.createBiquadFilter();
+    this.mguFilter = this.track(ctx.createBiquadFilter());
     this.mguFilter.type = "bandpass";
     this.mguFilter.frequency.value = 4200;
     this.mguFilter.Q.value = 5.0;
@@ -173,47 +324,47 @@ export class EngineAudio {
     for (let i = 0; i < bufferSize; i++) {
       output[i] = Math.random() * 2 - 1;
     }
-    const noiseSource = ctx.createBufferSource();
+    const noiseSource = this.track(ctx.createBufferSource());
     noiseSource.buffer = noiseBuffer;
     noiseSource.loop = true;
 
-    this.windFilter = ctx.createBiquadFilter();
+    this.windFilter = this.track(ctx.createBiquadFilter());
     this.windFilter.type = "bandpass";
     this.windFilter.frequency.value = 800;
     this.windFilter.Q.value = 1.2;
 
-    this.windGain = ctx.createGain();
+    this.windGain = this.track(ctx.createGain());
     this.windGain.gain.value = 0;
 
     noiseSource.connect(this.windFilter);
     this.windFilter.connect(this.windGain);
-    this.windGain.connect(this.master);
+    this.windGain.connect(this.sfxBus);
 
     // 7. Tire skid / drift noise
-    const skidSource = ctx.createBufferSource();
+    const skidSource = this.track(ctx.createBufferSource());
     skidSource.buffer = noiseBuffer;
     skidSource.loop = true;
 
-    this.skidFilter = ctx.createBiquadFilter();
+    this.skidFilter = this.track(ctx.createBiquadFilter());
     this.skidFilter.type = "bandpass";
     this.skidFilter.frequency.value = 1350;
     this.skidFilter.Q.value = 3.2;
 
-    this.skidGain = ctx.createGain();
+    this.skidGain = this.track(ctx.createGain());
     this.skidGain.gain.value = 0;
 
     skidSource.connect(this.skidFilter);
     this.skidFilter.connect(this.skidGain);
-    this.skidGain.connect(this.master);
+    this.skidGain.connect(this.sfxBus);
 
     // 8. Kerb rumble oscillator
-    this.kerbOsc = ctx.createOscillator();
+    this.kerbOsc = this.track(ctx.createOscillator());
     this.kerbOsc.type = "sine";
     this.kerbOsc.frequency.value = 46;
-    this.kerbGain = ctx.createGain();
+    this.kerbGain = this.track(ctx.createGain());
     this.kerbGain.gain.value = 0;
     this.kerbOsc.connect(this.kerbGain);
-    this.kerbGain.connect(this.master);
+    this.kerbGain.connect(this.sfxBus);
 
     // Start running oscillators
     const now = ctx.currentTime;
@@ -229,9 +380,17 @@ export class EngineAudio {
 
     this.enabled = true;
     if (ctx.state === "suspended") await ctx.resume();
+    this.continuous = new Set(this.sources);
+    this.music = new AmbientMusic(ctx, this.musicBus, (node) =>
+      this.track(node),
+    );
+    this.music.start();
+    this.applyMix();
   }
 
   update(speed, throttle, brake, drift, racing, finished, onKerb = false) {
+    this.quiet = false;
+    if (this.suspended) return;
     const now = performance.now();
     const dt = Math.min(0.05, Math.max(0.001, (now - this.previous) / 1000));
     this.previous = now;
@@ -295,15 +454,20 @@ export class EngineAudio {
     this.lastThrottle = throttle;
 
     // Turbo boost pressure simulation
-    const targetBoost = throttle && racing && Math.abs(safeSpeed) > 5 ? 1.0 : 0.0;
+    const targetBoost =
+      throttle && racing && Math.abs(safeSpeed) > 5 ? 1.0 : 0.0;
     this.boost +=
       (targetBoost - this.boost) * (1 - Math.exp(-dt * (throttle ? 4 : 8)));
     if (!Number.isFinite(this.boost)) this.boost = 0;
 
-    if (!this.ctx || !this.enabled) return;
+    if (!this.ctx || !this.enabled || this.suspended) return;
     try {
       const t = this.ctx.currentTime;
-      this.master.gain.setTargetAtTime(racing && !finished ? 0.4 : 0.14, t, 0.06);
+      this.master.gain.setTargetAtTime(
+        racing && !finished ? 0.4 : 0.14,
+        t,
+        0.06,
+      );
       this.effects.gain.setTargetAtTime(0.25, t, 0.03);
       const isShifting = now < this.shiftUntil && this.shiftType === "up";
 
@@ -333,7 +497,8 @@ export class EngineAudio {
       this.raspOsc.frequency.setTargetAtTime(baseFreq * 3, t, 0.02);
 
       // Turbo whistle tracks boost pressure and RPM
-      const turboFreq = 2200 + this.boost * 2400 + (this.rpm / this.maxRpm) * 800;
+      const turboFreq =
+        2200 + this.boost * 2400 + (this.rpm / this.maxRpm) * 800;
       this.turboOsc.frequency.setTargetAtTime(turboFreq, t, 0.03);
       this.turboGain.gain.setTargetAtTime(
         racing ? this.boost * 0.14 : 0,
@@ -399,7 +564,8 @@ export class EngineAudio {
       );
 
       // Apex kerb rumble
-      const kerbIntensity = onKerb && safeSpeed > 6 ? Math.min(0.4, safeSpeed / 60) : 0;
+      const kerbIntensity =
+        onKerb && safeSpeed > 6 ? Math.min(0.4, safeSpeed / 60) : 0;
       this.kerbGain.gain.setTargetAtTime(kerbIntensity, t, 0.03);
     } catch {}
   }
@@ -412,14 +578,18 @@ export class EngineAudio {
 
     const t = this.ctx.currentTime;
     const safeIntensity = Math.max(0.05, Math.min(1.0, intensity));
-    const popOsc = this.ctx.createOscillator();
-    const popGain = this.ctx.createGain();
+    const popOsc = this.track(this.ctx.createOscillator());
+    const popGain = this.track(this.ctx.createGain());
 
     popOsc.type = "triangle";
     popOsc.frequency.setValueAtTime(140 + Math.random() * 40, t);
     popOsc.frequency.exponentialRampToValueAtTime(30, t + 0.07);
 
-    popGain.gain.setValueAtTime(Math.max(0.001, safeIntensity * 0.5), t);
+    popGain.gain.setValueAtTime(0, t);
+    popGain.gain.linearRampToValueAtTime(
+      Math.max(0.001, safeIntensity * 0.5),
+      t + 0.006,
+    );
     popGain.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
 
     popOsc.connect(popGain);
@@ -443,9 +613,9 @@ export class EngineAudio {
     for (let i = 0; i < bursts; i++) {
       const delay = i * 0.055;
       const decay = Math.pow(0.55, i);
-      const flutterOsc = this.ctx.createOscillator();
-      const flutterFilter = this.ctx.createBiquadFilter();
-      const flutterGain = this.ctx.createGain();
+      const flutterOsc = this.track(this.ctx.createOscillator());
+      const flutterFilter = this.track(this.ctx.createBiquadFilter());
+      const flutterGain = this.track(this.ctx.createGain());
 
       flutterOsc.type = "sawtooth";
       flutterOsc.frequency.setValueAtTime(950 - i * 85, t + delay);
@@ -455,7 +625,11 @@ export class EngineAudio {
       flutterFilter.frequency.setValueAtTime(1600 - i * 140, t + delay);
       flutterFilter.Q.value = 5.0;
 
-      flutterGain.gain.setValueAtTime(Math.max(0.001, safeBoost * 0.22 * decay), t + delay);
+      flutterGain.gain.setValueAtTime(0, t + delay);
+      flutterGain.gain.linearRampToValueAtTime(
+        Math.max(0.001, safeBoost * 0.22 * decay),
+        t + delay + 0.006,
+      );
       flutterGain.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.045);
 
       flutterOsc.connect(flutterFilter);
@@ -479,12 +653,13 @@ export class EngineAudio {
     const t = this.ctx.currentTime;
     if (step >= 1 && step <= 5) {
       // 5 Red Lights arming tones
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc = this.track(this.ctx.createOscillator());
+      const gain = this.track(this.ctx.createGain());
       osc.type = "sine";
       osc.frequency.setValueAtTime(520, t);
       osc.frequency.exponentialRampToValueAtTime(460, t + 0.12);
-      gain.gain.setValueAtTime(0.45, t);
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.45, t + 0.006);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
       osc.connect(gain);
       gain.connect(this.effects);
@@ -496,14 +671,15 @@ export class EngineAudio {
       };
     } else if (step === 0) {
       // LIGHTS OUT / GO!
-      const osc1 = this.ctx.createOscillator();
-      const osc2 = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
+      const osc1 = this.track(this.ctx.createOscillator());
+      const osc2 = this.track(this.ctx.createOscillator());
+      const gain = this.track(this.ctx.createGain());
       osc1.type = "sine";
       osc2.type = "triangle";
       osc1.frequency.setValueAtTime(920, t);
       osc2.frequency.setValueAtTime(1150, t);
-      gain.gain.setValueAtTime(0.65, t);
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.65, t + 0.006);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
       osc1.connect(gain);
       osc2.connect(gain);
@@ -522,8 +698,8 @@ export class EngineAudio {
 
   beep(frequency = 600, duration = 0.12, volume = 1) {
     if (!this.ctx || !this.effects || !this.enabled) return;
-    const o = this.ctx.createOscillator();
-    const g = this.ctx.createGain();
+    const o = this.track(this.ctx.createOscillator());
+    const g = this.track(this.ctx.createGain());
     const t = this.ctx.currentTime;
     o.type = "sine";
     o.frequency.setValueAtTime(frequency, t);
@@ -531,7 +707,8 @@ export class EngineAudio {
       Math.max(40, frequency * 0.65),
       t + duration,
     );
-    g.gain.setValueAtTime(volume * 0.45, t);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(volume * 0.45, t + 0.006);
     g.gain.exponentialRampToValueAtTime(0.001, t + duration);
     o.connect(g);
     g.connect(this.effects);
@@ -544,6 +721,9 @@ export class EngineAudio {
   }
 
   impact(amount) {
+    const rising = Number.isFinite(amount) && amount > this.impactLevel + 0.08;
+    this.impactLevel = Number.isFinite(amount) ? amount : 0;
+    if (!rising) return;
     try {
       if (!Number.isFinite(amount)) return;
       const safeAmount = Math.min(1.0, Math.max(0, amount));
@@ -553,8 +733,8 @@ export class EngineAudio {
         if (!t || !this.enabled || !this.effects) return;
 
         // Heavy body/barrier thud
-        const o = this.ctx.createOscillator();
-        const g = this.ctx.createGain();
+        const o = this.track(this.ctx.createOscillator());
+        const g = this.track(this.ctx.createGain());
         o.type = "sawtooth";
         o.frequency.setValueAtTime(80 + safeAmount * 60, t);
         o.frequency.exponentialRampToValueAtTime(25, t + 0.16);
@@ -584,15 +764,16 @@ export class EngineAudio {
       [1046.5, 1318.5, 1567.98], // C octave
     ];
     chords.forEach((chord, step) => {
-      setTimeout(() => {
+      this.later(() => {
         if (!this.ctx || !this.enabled) return;
         const t = this.ctx.currentTime;
         chord.forEach((freq) => {
-          const o = this.ctx.createOscillator();
-          const g = this.ctx.createGain();
+          const o = this.track(this.ctx.createOscillator());
+          const g = this.track(this.ctx.createGain());
           o.type = "triangle";
           o.frequency.setValueAtTime(freq, t);
-          g.gain.setValueAtTime(0.35, t);
+          g.gain.setValueAtTime(0, t);
+          g.gain.linearRampToValueAtTime(0.35, t + 0.006);
           g.gain.exponentialRampToValueAtTime(
             0.001,
             t + (step === 3 ? 0.8 : 0.28),
@@ -610,7 +791,15 @@ export class EngineAudio {
     });
   }
 
-  updateRemoteCar(id, carPos, camPos, speed, throttle, carVel = null, camVel = null) {
+  updateRemoteCar(
+    id,
+    carPos,
+    camPos,
+    speed,
+    throttle,
+    carVel = null,
+    camVel = null,
+  ) {
     if (!this.ctx || !this.enabled) return;
     if (
       !carPos ||
@@ -627,29 +816,29 @@ export class EngineAudio {
     const dx = carPos.x - camPos.x;
     const dz = carPos.z - camPos.z;
     const dist = Math.hypot(dx, dz);
-    if (dist > 100) {
+    if (dist > (this.remoteCars.has(id) ? 110 : 95)) {
       this.removeRemoteCar(id);
       return;
     }
     let node = this.remoteCars.get(id);
     if (!node) {
       try {
-        const panner = this.ctx.createPanner();
+        const panner = this.track(this.ctx.createPanner());
         panner.panningModel = "HRTF";
         panner.distanceModel = "inverse";
         panner.refDistance = 4;
         panner.maxDistance = 100;
         panner.rolloffFactor = 1.0;
 
-        const osc = this.ctx.createOscillator();
+        const osc = this.track(this.ctx.createOscillator());
         osc.type = "sawtooth";
 
-        const filter = this.ctx.createBiquadFilter();
+        const filter = this.track(this.ctx.createBiquadFilter());
         filter.type = "bandpass";
         filter.frequency.value = 850;
         filter.Q.value = 2.2;
 
-        const gain = this.ctx.createGain();
+        const gain = this.track(this.ctx.createGain());
         gain.gain.value = 0;
 
         osc.connect(filter);
@@ -707,11 +896,19 @@ export class EngineAudio {
     const node = this.remoteCars.get(id);
     if (!node) return;
     try {
-      node.osc.stop();
-      node.osc.disconnect();
-      node.filter.disconnect();
-      node.gain.disconnect();
-      node.panner.disconnect();
+      const t = this.ctx.currentTime;
+      node.gain.gain.cancelScheduledValues(t);
+      node.gain.gain.setTargetAtTime(0, t, 0.015);
+      node.osc.addEventListener(
+        "ended",
+        () => {
+          node.filter.disconnect();
+          node.gain.disconnect();
+          node.panner.disconnect();
+        },
+        { once: true },
+      );
+      node.osc.stop(t + 0.08);
     } catch {}
     this.remoteCars.delete(id);
   }
@@ -758,19 +955,23 @@ export class EngineAudio {
     } catch {}
   }
   silence() {
-    if (this.master && this.ctx)
-      this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
+    if (this.quiet) return;
+    this.quiet = true;
+    for (const gain of [
+      this.master,
+      this.windGain,
+      this.skidGain,
+      this.kerbGain,
+    ])
+      gain?.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
+    this.cancelEffects();
     for (const id of [...this.remoteCars.keys()]) this.removeRemoteCar(id);
   }
   mute() {
     this.enabled = false;
-    if (this.effects && this.ctx)
-      this.effects.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
-    if (this.master && this.ctx) {
-      this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.04);
-    }
-    for (const id of [...this.remoteCars.keys()]) {
-      this.removeRemoteCar(id);
-    }
+    this.music?.stop();
+    this.cancelEffects();
+    this.applyMix();
+    for (const id of [...this.remoteCars.keys()]) this.removeRemoteCar(id);
   }
 }

@@ -4,7 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="theme-color" content="#122620" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏎️</text></svg>" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏎️</text></svg>"
+    />
     <title>APEX — Friends on the grid</title>
   </head>
   <body>
@@ -16,9 +19,35 @@
       <div class="top-right">
         <span id="connection">CONNECTING</span
         ><button id="sound" class="small">SOUND OFF</button
+        ><button
+          id="audioSettings"
+          class="small"
+          aria-expanded="false"
+          aria-controls="audioPanel"
+        >
+          MIXER</button
         ><button id="quality" class="small">QUALITY MEDIUM</button>
       </div>
     </header>
+    <section
+      id="audioPanel"
+      class="panel audio-panel"
+      hidden
+      aria-label="Audio mixer"
+    >
+      <div class="eyebrow">SOUND MIX</div>
+      <label for="volumeMaster"
+        >MASTER <output id="valueMaster">80%</output></label
+      ><input id="volumeMaster" type="range" min="0" max="100" value="80" />
+      <label for="volumeEngine"
+        >ENGINE <output id="valueEngine">80%</output></label
+      ><input id="volumeEngine" type="range" min="0" max="100" value="80" />
+      <label for="volumeMusic">MUSIC <output id="valueMusic">22%</output></label
+      ><input id="volumeMusic" type="range" min="0" max="100" value="22" />
+      <label for="volumeSfx">SFX <output id="valueSfx">70%</output></label
+      ><input id="volumeSfx" type="range" min="0" max="100" value="70" />
+      <p class="micro">Original ambient score · engine-led race mix</p>
+    </section>
     <main id="home">
       <div class="eyebrow">PRIVATE ROOMS. REAL RIVALRIES.</div>
       <h1>Good friends.<br /><em>Bad losers.</em></h1>
@@ -72,9 +101,15 @@
         <button class="leave small">LEAVE</button>
       </div>
       <div id="leaderboard" class="panel"></div>
-      <div class="speed"><div class="rev-meter" id="rpm"><i></i></div><div class="gear-badge">GEAR <b id="gear">1</b></div><strong id="speed">0</strong><span>KM/H</span></div>
+      <div class="speed">
+        <div class="rev-meter" id="rpm"><i></i></div>
+        <div class="gear-badge">GEAR <b id="gear">1</b></div>
+        <strong id="speed">0</strong><span>KM/H</span>
+      </div>
       <div id="finishMessage"></div>
-      <div id="gantryHud" class="gantry-hud" hidden><i></i><i></i><i></i><i></i><i></i></div>
+      <div id="gantryHud" class="gantry-hud" hidden>
+        <i></i><i></i><i></i><i></i><i></i>
+      </div>
       <div id="countdown"></div>
       <canvas id="minimap" width="180" height="200"></canvas>
     </section>

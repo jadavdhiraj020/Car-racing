@@ -5,10 +5,12 @@ import "./style.css";
 import { io } from "socket.io-client";
 import { createScene } from "./scene.js";
 import { TRACK, LENGTH, point, nearest } from "../../shared/track.js";
+import { validSnapshot } from "../../shared/protocol.js";
 
 const $ = (id) => document.getElementById(id),
   socket = io(),
   keys = {},
+  inputSources = new Map(),
   map = $("minimap").getContext("2d");
 
 const toCX = (x) => 95 + (x + 20) * 0.23;
@@ -56,6 +58,10 @@ let view,
 
 window.__getState = () => (state ? structuredClone(state) : null);
 window.__getKeys = () => ({ ...keys });
+window.__getDiagnostics = () => ({
+  render: view?.metrics(),
+  audio: engineAudio.metrics?.(),
+});
 let clockKnown = false,
   clockSamples = [],
   inputSeq = 0,
@@ -114,6 +120,7 @@ function beep(freq = 600, duration = 0.12) {
 }
 
 $("sound").onclick = async () => {
+  $("sound").disabled = true;
   sound = !sound;
   if (sound) {
     try {
@@ -124,12 +131,33 @@ $("sound").onclick = async () => {
     }
   } else engineAudio.mute();
   $("sound").textContent = sound ? "SOUND ON" : "SOUND OFF";
+  $("sound").disabled = false;
 };
 
+$("audioSettings").onclick = () => {
+  const open = $("audioPanel").hidden;
+  $("audioPanel").hidden = !open;
+  $("audioSettings").setAttribute("aria-expanded", String(open));
+};
+for (const name of ["Master", "Engine", "Music", "Sfx"]) {
+  $("volume" + name).oninput = () => {
+    const value = Number($("volume" + name).value);
+    $("value" + name).textContent = value + "%";
+    engineAudio.setVolumes({ [name.toLowerCase()]: value / 100 });
+  };
+}
+window.addEventListener("pagehide", () => {
+  engineAudio.setSuspended(true);
+});
+window.addEventListener("pageshow", () => {
+  engineAudio.setSuspended(document.hidden);
+});
+
 $("quality").onclick = () => {
-  quality = (quality + 1) % 3;
+  quality = (quality + 1) % 4;
   view?.quality(quality);
-  $("quality").textContent = "QUALITY " + ["LOW", "MEDIUM", "HIGH"][quality];
+  $("quality").textContent =
+    "QUALITY " + ["LOW", "MEDIUM", "HIGH", "ULTRA"][quality];
 };
 
 const invite = new URLSearchParams(location.search).get("room");
@@ -164,6 +192,9 @@ document.querySelectorAll(".leave").forEach(
     (b.onclick = async () => {
       if (await request("leave")) {
         state = null;
+        clearControls();
+        engineAudio.setPhase("home");
+        engineAudio.silence();
         render();
         view?.update({ cars: [], players: [], phase: "lobby" }, socket.id);
         history.replaceState(null, "", location.pathname);
@@ -194,7 +225,8 @@ socket.on("connect", () => {
 socket.on("disconnect", () => {
   $("connection").textContent = "RECONNECTING";
   state = null;
-  for (const k in keys) keys[k] = false;
+  engineAudio.setPhase("home");
+  clearControls();
   if (sound) engineAudio.silence();
   render();
   view?.update({ cars: [], players: [], phase: "lobby" }, socket.id);
@@ -221,6 +253,13 @@ const esc = (s) =>
       ],
   );
 
+const htmlCache = new Map();
+function setHtml(id, html) {
+  if (htmlCache.get(id) !== html) {
+    $(id).innerHTML = html;
+    htmlCache.set(id, html);
+  }
+}
 const time = (ms) => {
   const safeMs = Number.isFinite(ms) && ms > 0 ? ms : 0;
   const s = safeMs / 1000;
@@ -252,12 +291,15 @@ function render() {
 
   const host = state.host === socket.id;
   $("roomCode").textContent = state.code;
-  $("players").innerHTML = state.players
-    .map(
-      (p) =>
-        `<div class="player"><i class="swatch" style="background:${p.color}"></i>${esc(p.name)}<span class="badge">${p.id === state.host ? "HOST" : "DRIVER"}</span></div>`,
-    )
-    .join("");
+  setHtml(
+    "players",
+    state.players
+      .map(
+        (p) =>
+          `<div class="player"><i class="swatch" style="background:${p.color}"></i>${esc(p.name)}<span class="badge">${p.id === state.host ? "HOST" : "DRIVER"}</span></div>`,
+      )
+      .join(""),
+  );
   $("start").hidden = !host;
   $("start").disabled = state.players.length < 2;
   $("waiting").textContent =
@@ -272,38 +314,44 @@ function render() {
     player = (id) => state.players.find((p) => p.id === id);
   const leaderProgress = rows[0]?.progress || 0;
 
-  $("leaderboard").innerHTML = rows
-    .map((c, i) => {
-      const p = player(c.id);
-      const isMe = c.id === socket.id;
-      const delta =
-        i === 0
-          ? "LEADER"
-          : c.finished !== null
-            ? time(c.finished)
-            : `+${Math.round((Math.max(0, leaderProgress - c.progress) * LENGTH) / 24)}m`;
-      return (
-        `<div class="leader-row ${isMe ? "me" : ""}">` +
-        `<span class="leader-pos">${i + 1}</span>` +
-        `<i class="swatch" style="background:${p?.color || "#fff"}"></i>` +
-        `<span class="leader-name">${esc(p?.name || "Driver")}</span>` +
-        `<span class="leader-gap">${c.finished !== null ? "FIN" : delta}</span>` +
-        `</div>`
-      );
-    })
-    .join("");
+  setHtml(
+    "leaderboard",
+    rows
+      .map((c, i) => {
+        const p = player(c.id);
+        const isMe = c.id === socket.id;
+        const delta =
+          i === 0
+            ? "LEADER"
+            : c.finished !== null
+              ? time(c.finished)
+              : `+${Math.round((Math.max(0, leaderProgress - c.progress) * LENGTH) / 24)}m`;
+        return (
+          `<div class="leader-row ${isMe ? "me" : ""}">` +
+          `<span class="leader-pos">${i + 1}</span>` +
+          `<i class="swatch" style="background:${p?.color || "#fff"}"></i>` +
+          `<span class="leader-name">${esc(p?.name || "Driver")}</span>` +
+          `<span class="leader-gap">${c.finished !== null ? "FIN" : delta}</span>` +
+          `</div>`
+        );
+      })
+      .join(""),
+  );
 
   if (phase === "results") {
     $("winner").textContent =
       rows[0]?.finished !== null
         ? `${player(rows[0]?.id)?.name} takes the win.`
         : "Time’s up!";
-    $("resultRows").innerHTML = rows
-      .map(
-        (c, i) =>
-          `<div class="result-row"><b>${i + 1}</b><i class="swatch" style="background:${player(c.id)?.color}"></i><span>${esc(player(c.id)?.name)}</span><span>${c.finished !== null ? time(c.finished) : "DNF"}</span></div>`,
-      )
-      .join("");
+    setHtml(
+      "resultRows",
+      rows
+        .map(
+          (c, i) =>
+            `<div class="result-row"><b>${i + 1}</b><i class="swatch" style="background:${player(c.id)?.color}"></i><span>${esc(player(c.id)?.name)}</span><span>${c.finished !== null ? time(c.finished) : "DNF"}</span></div>`,
+        )
+        .join(""),
+    );
     $("rematch").hidden = !host;
     $("resultWaiting").textContent = host
       ? "New grid. Same friends."
@@ -313,7 +361,9 @@ function render() {
 }
 
 socket.on("state", (s) => {
-  if (!s || !Array.isArray(s.cars) || !Array.isArray(s.players)) return;
+  if (!validSnapshot(s) || (state?.code === s.code && s.seq <= state.seq))
+    return;
+  engineAudio.setPhase(s.phase);
   state = s;
   if (!clockKnown) offset = s.serverNow - Date.now();
   updateHud();
@@ -400,34 +450,53 @@ function resolveKey(e) {
   );
 }
 
+// Multiple physical keys or fingers may hold the same logical control.
+function setControl(source, key, pressed) {
+  const previous = inputSources.get(source);
+  if (pressed) inputSources.set(source, key);
+  else inputSources.delete(source);
+  let changed = false;
+  for (const control of new Set([previous, key])) {
+    if (!control) continue;
+    const active = [...inputSources.values()].includes(control);
+    if (!!keys[control] !== active) {
+      keys[control] = active;
+      changed = true;
+    }
+  }
+  if (changed) sendInput(true);
+}
+
+function clearControls() {
+  inputSources.clear();
+  for (const k in keys) keys[k] = false;
+}
+
 window.addEventListener("keydown", (e) => {
   if (e.target instanceof HTMLInputElement) return;
   const key = resolveKey(e);
   if (key && state) {
     e.preventDefault();
-    if (!keys[key]) {
-      keys[key] = true;
-      sendInput(true);
-    }
+    setControl(`keyboard:${e.code || e.key}`, key, true);
   }
 });
 
 window.addEventListener("keyup", (e) => {
   const key = resolveKey(e);
   if (key) {
-    keys[key] = false;
-    sendInput(true);
+    setControl(`keyboard:${e.code || e.key}`, key, false);
   }
 });
 
 window.addEventListener("blur", () => {
-  for (const k in keys) keys[k] = false;
+  clearControls();
+  sendInput(true);
 });
 
 document.addEventListener("visibilitychange", () => {
+  engineAudio.setSuspended(document.hidden);
   if (document.hidden) {
-    for (const k in keys) keys[k] = false;
-    if (sound) engineAudio.silence();
+    clearControls();
     sendInput(true);
   }
 });
@@ -436,15 +505,13 @@ document.querySelectorAll("[data-key]").forEach((b) => {
   b.onpointerdown = (e) => {
     e.preventDefault();
     b.setPointerCapture(e.pointerId);
-    keys[b.dataset.key] = true;
-    sendInput(true);
+    setControl(`pointer:${e.pointerId}`, b.dataset.key, true);
   };
   b.onpointerup =
     b.onpointercancel =
     b.onlostpointercapture =
-      () => {
-        keys[b.dataset.key] = false;
-        sendInput(true);
+      (e) => {
+        setControl(`pointer:${e.pointerId}`, b.dataset.key, false);
       };
 });
 
@@ -472,9 +539,8 @@ function updateCountdown() {
       : state.phase === "racing" && elapsed < 1000
         ? "GO!"
         : "";
-  $("countdown").textContent = count;
   if (count !== lastCountdown) {
-    if (count) beep(count === "GO!" ? 900 : 500);
+    $("countdown").textContent = count;
     lastCountdown = count;
     $("countdown").classList.remove("pulse");
     void $("countdown").offsetWidth;
@@ -521,10 +587,13 @@ function updateHud() {
   updateCountdown();
   const c = state.cars.find((c) => c.id === socket.id);
   if (!c) return;
-  $("lap").textContent = `${Math.min(3, Math.floor((c.passed || 0) / 24) + 1)} / 3`;
+  $("lap").textContent =
+    `${Math.min(3, Math.floor((c.passed || 0) / 24) + 1)} / 3`;
   $("position").textContent =
     `${ordered().findIndex((p) => p.id === c.id) + 1} / ${state.players.length}`;
-  const safeSpeed = Number.isFinite(c.speed) ? Math.max(0, Math.round(c.speed * 3.6)) : 0;
+  const safeSpeed = Number.isFinite(c.speed)
+    ? Math.max(0, Math.round(c.speed * 3.6))
+    : 0;
   $("speed").textContent = safeSpeed;
   $("timer").textContent = time(c.finished ?? elapsed);
   $("finishMessage").textContent =
@@ -538,6 +607,7 @@ function updateHud() {
 function frame() {
   requestAnimationFrame(frame);
   try {
+    if (document.hidden) return;
     sendInput();
     if (!state) {
       if (sound) engineAudio.silence();
@@ -571,12 +641,9 @@ function frame() {
         ? "R"
         : state.phase !== "racing"
           ? "N"
-          : (engineAudio.gear || "1");
+          : engineAudio.gear || "1";
     const safeRpm = Number.isFinite(engineAudio?.rpm) ? engineAudio.rpm : 1000;
-    const rpmPercent = Math.min(
-      100,
-      Math.max(0, (safeRpm / 13500) * 100),
-    );
+    const rpmPercent = Math.min(100, Math.max(0, (safeRpm / 13500) * 100));
     $("rpm").style.setProperty("--rpm", rpmPercent.toFixed(1));
     $("rpm").classList.toggle("shift-blink", safeRpm > 12400);
     view?.input(keys, inputHistory);

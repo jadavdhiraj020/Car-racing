@@ -20,7 +20,7 @@ Cannon is a deliberate simplification: the server runs the same lightweight Java
 
 The client sends six boolean controls and an input sequence; it cannot submit position, laps, or results. The server advances physics at 60 ticks/second, accepts the next checkpoint only in the forward direction, and counts 24 gates per lap. Reset returns to the last accepted checkpoint without increasing progress. A car finishes at 72 crossings. Results appear when everyone remaining finishes, 60 seconds after the first finish, or at the 10-minute race limit. Unfinished drivers receive DNF. Finish times interpolate the crossing within a physics tick; roster order breaks exact ties.
 
-The browser uses a shared steering controller for bounded local prediction, acknowledges input sequences, and reconciles server corrections. Opponents interpolate on a synchronized timeline with a latency-aware buffer and limited extrapolation. Prediction yields to authoritative contacts near other cars and barriers. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
+The browser uses a shared steering controller for fixed-step local prediction, acknowledges input sequences, and reconciles server corrections. Opponents interpolate on a shared synchronized timeline with a latency/jitter-aware buffer and limited extrapolation. Prediction yields to authoritative contacts near other cars and barriers. Sequenced snapshots are validated before reaching rendering, HUD or audio. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels that avoid HUD panels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
 
 Disconnects immediately remove the driver and transfer host to the next remaining player. Empty rooms are deleted. Socket.IO reconnects transport automatically, but a disconnected driver must join the lobby again; mid-race joining/resuming is intentionally disabled. A host can rematch after results to reopen the lobby. Restarts and deploys erase all rooms.
 
@@ -33,12 +33,17 @@ car racing game/
 │   └── src/
 │       ├── main.js             Socket client, input, UI, audio and minimap
 │       ├── scene.js            Babylon track, cars, environment and camera
+│       ├── audio.js            Procedural engine, spatial opponents and mixer
+│       ├── music.js            Original ambient score and voice lifecycle
 │       └── style.css           Responsive racing interface
 ├── server/
 │   ├── index.js                HTTP, rooms, validation and race lifecycle
 │   └── race.js                 Physics, checkpoint rules and snapshots
 ├── shared/
-│   └── track.js                Loop geometry, checkpoints and configuration
+│   ├── track.js                Loop geometry, checkpoints and configuration
+│   ├── driving.js              Shared steering, grip and local prediction
+│   ├── contact.js              Oriented vehicle footprints
+│   └── protocol.js             Snapshot validation
 ├── test/
 │   └── race.test.js            Physics and actual Socket.IO integration tests
 ├── scripts/
@@ -115,7 +120,11 @@ Screenshots are written to `test-artifacts/`. Chrome automation uses a temporary
 5. Click the game area if needed. Hold W to accelerate; use A/D to steer. In the other window watch the first car move. Use R if stuck. If a window loses focus, controls release automatically.
 6. Follow the loop and glowing gate posts for three laps. Each finish registers on the server. After both finish (or the timeout), the host clicks **RUN IT BACK ↻**, then starts again.
 
-Controls: W/Up accelerate; S/Down brake then reverse; A/Left and D/Right steer; Space drift; R reset. Touch buttons appear on devices with coarse pointers. Sound is opt-in using **SOUND OFF**; it enables synthesized engine and countdown/results tones. Graphics defaults to Medium; the quality button cycles through High, Low, and Medium, changing render resolution. No downloaded music or models.
+Controls: W/Up accelerate; S/Down brake then reverse; A/Left and D/Right steer; Space drift; R reset. Touch buttons appear on devices with coarse pointers. Multiple keys or fingers holding one control remain active until the last is released. Losing focus releases all driving controls.
+
+Sound is opt-in using **SOUND OFF**. **MIXER** independently adjusts Master, Engine, Music and SFX. The original 64 BPM Japanese-inspired ambient score uses synthesized plucked, flute-like, piano-like and pad tones; music becomes quieter during racing. Engine pitch/load, shifts, tire/kerb sounds, wind and spatial opponents remain dynamic. Muting or hiding the page cancels transient sounds and music scheduling; resuming avoids replaying old cues. No recordings or commercial melodies are bundled.
+
+Graphics defaults to Medium; the button cycles through High, Ultra, Low and Medium. Tiers adjust resolution and shadows, with bounded adaptive resolution responding to frame times. Ultra starts above native resolution and costs more GPU time. The existing WebGL renderer is retained and validated with WebGL2; WebGPU was not introduced. The chase camera damps position and aim, and wheel/body motion follows speed, steering and load.
 
 Testing over your home Wi-Fi requires the PC's LAN address, not localhost. Run `ipconfig`, find the active Wi-Fi adapter's IPv4 address, and open `http://THAT-ADDRESS:3000` on the other device. If Windows asks, allow Node on your trusted private network. The easiest test between different homes is the deployed HTTPS URL below; do not forward router ports.
 
@@ -261,14 +270,12 @@ No public URL exists yet. Render will assign one like `https://apex-friends-raci
 
 ## Verification
 
-See `VERIFICATION.md` for observed checks, not just a mental checklist. Public deployment remains pending your account connection. Mobile layout is checked at a narrow viewport; actual touch-device play, wide-area latency and low-end hardware performance still need real-device testing.
+See [VERIFICATION.md](VERIFICATION.md) for measured frame times, complete two-browser races, stress checks and limits. Public deployment is NOT TESTED in this run because no deployed URL was available. Mobile layout is checked at a narrow viewport; actual touch-device play, wide-area latency and low-end hardware performance still need real-device testing.
 
 # 🔴 ONLY THINGS YOU MUST DO
 
-1. Sign in to GitHub and publish the prepared repository (GitHub Desktop steps above).
-2. Sign in to Render, connect that repository, and select the **Free** web service using the exact settings above.
-3. Copy your assigned HTTPS URL and invite a friend on another network for the final online race check.
+1. If not already deployed, sign in to Render, connect the existing GitHub repository, and select the **Free** web service using the exact settings above.
+2. If already deployed, confirm Render has successfully deployed the latest `main` commit.
+3. Open your assigned HTTPS URL, create a room, share its invite link, and invite a friend on another network for the final online race check.
 
 No local server management is needed after that one-time deployment, subject to free hosting limits.
-
-# Car-racing
