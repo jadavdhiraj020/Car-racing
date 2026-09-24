@@ -531,7 +531,10 @@ function sendInput(force = false) {
   const now = performance.now();
   if (state && socket.connected && (force || now - lastInputSent >= 33)) {
     const packet = { ...keys, seq: ++inputSeq };
-    socket.volatile.emit("input", packet);
+    // Key changes and releases must arrive; only unchanged periodic updates
+    // may be dropped when a connection is congested.
+    if (force) socket.emit("input", packet);
+    else socket.volatile.emit("input", packet);
     inputHistory.push({ seq: packet.seq, at: now, input: { ...keys } });
     if (inputHistory.length > 90) inputHistory.shift();
     lastInputSent = now;

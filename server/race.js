@@ -304,13 +304,38 @@ export class Race {
         c.b.velocity.z = (c.b.velocity.z / currentSpeed) * 52;
       }
 
+      const near = nearest(c.b.position.x, c.b.position.z);
+      // At low speed the tires cannot steer a nose pressed into a barrier.
+      // Help the car face back onto the road while throttle is held, so a
+      // contact does not leave it grinding against the wall indefinitely.
+      if (running && !c.finished && c.controls?.up && currentSpeed < 9) {
+        const frame = point(near.s);
+        const side =
+          (c.b.position.x - frame.x) * Math.cos(frame.yaw) -
+          (c.b.position.z - frame.z) * Math.sin(frame.yaw);
+        const relativeYaw = c.yaw - frame.yaw;
+        const extent =
+          CAR_HALF_WIDTH * Math.abs(Math.cos(relativeYaw)) +
+          CAR_HALF_LENGTH * Math.abs(Math.sin(relativeYaw));
+        const limit = TRACK.width / 2 - extent;
+        const outward = Math.sin(relativeYaw) * Math.sign(side);
+        if (Math.abs(side) > limit - 0.25 && outward > 0.12) {
+          const desiredYaw = frame.yaw - Math.sign(side) * 0.24;
+          const yawError = Math.atan2(
+            Math.sin(desiredYaw - c.yaw),
+            Math.cos(desiredYaw - c.yaw),
+          );
+          c.yaw += yawError * 0.15 * (1 - currentSpeed / 9);
+        }
+      }
+
       c.b.quaternion.setFromEuler(0, c.yaw, 0);
 
       if (running && !c.finished) this.progress(c, now, startAt, dt);
       c.impact = (c.impact || 0) * Math.exp(-6 * dt);
       if (!Number.isFinite(c.impact)) c.impact = 0;
 
-      const trackDist = nearest(c.b.position.x, c.b.position.z).distance;
+      const trackDist = near.distance;
       if (!Number.isFinite(trackDist) || trackDist > 45) {
         this.reset(c);
       }

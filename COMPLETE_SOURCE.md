@@ -87,11 +87,11 @@ A complete friends-only racing project: Babylon.js graphics, an authoritative No
 | Storage / login | None                        | Rooms live in memory; players enter nicknames                    |
 | Hosting         | One Render Free web service | One HTTPS URL for website and multiplayer                        |
 
-Cannon is a deliberate simplification: the server runs the same lightweight JavaScript simulation without a browser or WASM setup, and Babylon renders its results. Havok is not required or bundled. Cannon is MIT licensed: https://github.com/pmndrs/cannon-es. Cars, ground and barriers collide on the server. Two physics substeps plus oriented contact projection keep cars separated, including beside barriers. Handling is an arcade simulation; suspension and body weight transfer are visual approximations.
+Cannon is a deliberate simplification: the server runs the same lightweight JavaScript simulation without a browser or WASM setup, and Babylon renders its results. Havok is not required or bundled. Cannon is MIT licensed: https://github.com/pmndrs/cannon-es. Cars, ground and barriers collide on the server. Two physics substeps plus oriented contact projection keep cars separated, including beside barriers. Low-speed barrier recovery turns a throttling car back toward the road when its nose stays pressed against a wall. Handling is an arcade simulation; suspension and body weight transfer are visual approximations.
 
 The client sends six boolean controls and an input sequence; it cannot submit position, laps, or results. The server advances physics at 60 ticks/second, accepts the next checkpoint only in the forward direction, and counts 24 gates per lap. Reset returns to the last accepted checkpoint without increasing progress. A car finishes at 72 crossings. Results appear when everyone remaining finishes, 60 seconds after the first finish, or at the 10-minute race limit. Unfinished drivers receive DNF. Finish times interpolate the crossing within a physics tick; roster order breaks exact ties.
 
-The browser uses a shared steering controller for fixed-step local prediction, acknowledges input sequences, and reconciles server corrections. Opponents interpolate on a shared synchronized timeline with a latency/jitter-aware buffer and limited extrapolation. Prediction yields to authoritative contacts near other cars and barriers, with a short visual handoff to avoid a visible snap. Sequenced snapshots are validated before reaching rendering, HUD or audio. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels that avoid HUD panels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
+The browser uses a shared steering controller for fixed-step local prediction, acknowledges input sequences, and reconciles server corrections. Key presses and releases use reliable Socket.IO delivery; unchanged periodic input updates may be dropped under congestion. Opponents interpolate on a shared synchronized timeline with a latency/jitter-aware buffer and limited extrapolation. Prediction yields to authoritative contacts near other cars and barriers, with a short visual handoff to avoid a visible snap. Sequenced snapshots are validated before reaching rendering, HUD or audio. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels that avoid HUD panels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
 
 Disconnects immediately remove the driver and transfer host to the next remaining player. Empty rooms are deleted. Socket.IO reconnects transport automatically, but a disconnected driver must join the lobby again; mid-race joining/resuming is intentionally disabled. A host can rematch after results to reopen the lobby. Restarts and deploys erase all rooms.
 
@@ -637,6 +637,14 @@ For manual multiplayer verification, create/join a room in two independent brows
 - In the same two-car, 1280 × 800 native-GPU Chrome handoff scenario, the largest sampled local-car movement was 2.10 m in a frame, versus 6.11 m before the change. The final run recorded a 13.9 ms median and 21.3 ms p95 frame interval over 409 frames, with zero failed render frames and no page errors. These are local observations, not a guarantee under every network condition.
 - Production build, eight existing Node tests, and the two-client browser smoke check passed. Both existing stress scripts passed in memory with native-GPU Chrome: five consecutive race/rematch cycles and all seven crash/contact/rejoin checks. No new test files were created.
 - The unmodified stress scripts' SwiftShader software-rendering runs timed out on browser click/countdown timing after earlier checks passed. A focused native-GPU pointer test confirmed rematch START works; the native-GPU stress runs completed.
+
+## 2026-09-24 barrier and input responsiveness follow-up
+
+- Reproduced a barrier trap in 16 server simulations: after striking the opposite wall, a car held on throttle could spend 79–155 of 300 ticks below 2 m/s. Low-speed barrier recovery now turns an outward-facing car gently toward the road once per tick. The same scenarios spent 0–9 ticks below 2 m/s and remained within the track edge.
+- Input changes and releases now use reliable Socket.IO delivery, while unchanged periodic packets remain volatile to avoid a backlog on congested links.
+- In a five-transition local two-client Chrome check, key changes reached the server in 10–77 ms and appeared in the other client's snapshots in 40–140 ms. This includes browser scheduling on the test machine, not internet latency or the remote render buffer.
+- Production build, eight existing Node tests, two-client browser smoke check, and the native-GPU crash/contact/rematch/rejoin stress run passed with zero browser errors. No new test file was added.
+- Loopback checks cannot quantify delay between friends on different networks. Hosting region, connection quality, and browser hardware can still affect perceived lag.
 
 ## NOT TESTED and practical limits
 
@@ -2325,7 +2333,10 @@ function sendInput(force = false) {
   const now = performance.now();
   if (state && socket.connected && (force || now - lastInputSent >= 33)) {
     const packet = { ...keys, seq: ++inputSeq };
-    socket.volatile.emit("input", packet);
+    // Key changes and releases must arrive; only unchanged periodic updates
+    // may be dropped when a connection is congested.
+    if (force) socket.emit("input", packet);
+    else socket.volatile.emit("input", packet);
     inputHistory.push({ seq: packet.seq, at: now, input: { ...keys } });
     if (inputHistory.length > 90) inputHistory.shift();
     lastInputSent = now;
@@ -9385,13 +9396,38 @@ export class Race {
         c.b.velocity.z = (c.b.velocity.z / currentSpeed) * 52;
       }
 
+      const near = nearest(c.b.position.x, c.b.position.z);
+      // At low speed the tires cannot steer a nose pressed into a barrier.
+      // Help the car face back onto the road while throttle is held, so a
+      // contact does not leave it grinding against the wall indefinitely.
+      if (running && !c.finished && c.controls?.up && currentSpeed < 9) {
+        const frame = point(near.s);
+        const side =
+          (c.b.position.x - frame.x) * Math.cos(frame.yaw) -
+          (c.b.position.z - frame.z) * Math.sin(frame.yaw);
+        const relativeYaw = c.yaw - frame.yaw;
+        const extent =
+          CAR_HALF_WIDTH * Math.abs(Math.cos(relativeYaw)) +
+          CAR_HALF_LENGTH * Math.abs(Math.sin(relativeYaw));
+        const limit = TRACK.width / 2 - extent;
+        const outward = Math.sin(relativeYaw) * Math.sign(side);
+        if (Math.abs(side) > limit - 0.25 && outward > 0.12) {
+          const desiredYaw = frame.yaw - Math.sign(side) * 0.24;
+          const yawError = Math.atan2(
+            Math.sin(desiredYaw - c.yaw),
+            Math.cos(desiredYaw - c.yaw),
+          );
+          c.yaw += yawError * 0.15 * (1 - currentSpeed / 9);
+        }
+      }
+
       c.b.quaternion.setFromEuler(0, c.yaw, 0);
 
       if (running && !c.finished) this.progress(c, now, startAt, dt);
       c.impact = (c.impact || 0) * Math.exp(-6 * dt);
       if (!Number.isFinite(c.impact)) c.impact = 0;
 
-      const trackDist = nearest(c.b.position.x, c.b.position.z).distance;
+      const trackDist = near.distance;
       if (!Number.isFinite(trackDist) || trackDist > 45) {
         this.reset(c);
       }

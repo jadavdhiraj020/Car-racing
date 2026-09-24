@@ -77,6 +77,14 @@ For manual multiplayer verification, create/join a room in two independent brows
 - Production build, eight existing Node tests, and the two-client browser smoke check passed. Both existing stress scripts passed in memory with native-GPU Chrome: five consecutive race/rematch cycles and all seven crash/contact/rejoin checks. No new test files were created.
 - The unmodified stress scripts' SwiftShader software-rendering runs timed out on browser click/countdown timing after earlier checks passed. A focused native-GPU pointer test confirmed rematch START works; the native-GPU stress runs completed.
 
+## 2026-09-24 barrier and input responsiveness follow-up
+
+- Reproduced a barrier trap in 16 server simulations: after striking the opposite wall, a car held on throttle could spend 79–155 of 300 ticks below 2 m/s. Low-speed barrier recovery now turns an outward-facing car gently toward the road once per tick. The same scenarios spent 0–9 ticks below 2 m/s and remained within the track edge.
+- Input changes and releases now use reliable Socket.IO delivery, while unchanged periodic packets remain volatile to avoid a backlog on congested links.
+- In a five-transition local two-client Chrome check, key changes reached the server in 10–77 ms and appeared in the other client's snapshots in 40–140 ms. This includes browser scheduling on the test machine, not internet latency or the remote render buffer.
+- Production build, eight existing Node tests, two-client browser smoke check, and the native-GPU crash/contact/rematch/rejoin stress run passed with zero browser errors. No new test file was added.
+- Loopback checks cannot quantify delay between friends on different networks. Hosting region, connection quality, and browser hardware can still affect perceived lag.
+
 ## NOT TESTED and practical limits
 
 - Public deployment: NOT TESTED. No deployed URL was available. Render configuration, health route and same-origin networking remain intact; a Git push does not prove that a public deployment succeeded.
