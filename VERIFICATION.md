@@ -1,6 +1,6 @@
 # Verification record
 
-Checked 2026-09-20 through 2026-09-23 on Windows, Node.js 24.19.0 and Chrome using Intel UHD / Direct3D11. No new test files were added. The existing browser smoke check's quality list was updated for Ultra; other additional checks ran inline. Build artifacts, screenshots and local metrics are ignored under test-artifacts/.
+Checked 2026-09-20 through 2026-09-24 on Windows, Node.js 24.19.0 and Chrome using Intel UHD / Direct3D11. No new test files were added. The existing browser smoke check's quality list was updated for Ultra; other additional checks ran inline. Build artifacts, screenshots and local metrics are ignored under test-artifacts/.
 
 ## Audit and fixes
 
@@ -60,6 +60,14 @@ Run `npm.cmd ci`, `npm.cmd test`, `npm.cmd run build`, then `npm.cmd start`. Pro
 `npm.cmd run test:browser` runs the existing Chrome smoke script. Its default uses software graphics. Native verification evaluates the same assertions in memory with `--use-angle=d3d11` and a separate browser context per driver. Inline extensions check combined controls, mixer cleanup and runtime-error counters. Complete-lap verification imports the shared track geometry into a temporary browser controller that dispatches ordinary key events every 50 ms; it does not alter game positions, speed, checkpoints or finishes. No extra test source is saved.
 
 For manual multiplayer verification, create/join a room in two independent browser windows, turn sound on, start, drive three laps, check finishing order and rematch. Test distant friends using the deployed HTTPS URL.
+
+## 2026-09-24 rendering follow-up
+
+- Corrected the visual chassis ride height: the wing/body now sit lower relative to the grounded wheel pivots. This changes presentation only; server collision dimensions and checkpoint geometry are unchanged. Inspected the production race view at 180 km/h.
+- Changed procedural palms from flat oval fronds into tapered, curved fronds. Grouped static palm geometry by circuit region for GPU instancing and removed off-screen trunk shadow draws. Inspected the production lobby view and checked the generated world bounds of all eight regions.
+- Short-circuited oriented visual contact projection when a pass makes no correction. It still allows all eight passes where cars or barriers actually need separation.
+- In the paired two-client 1280 × 800 Chrome drive on this machine, the committed version averaged 18.67 / 18.63 ms per frame (p95 21.7 / 21.9 ms, 573 meshes). The final version averaged 17.59 / 17.53 ms (p95 20.6 / 20.8 ms, 253 meshes). Both clients reached 180 km/h with zero failed render frames and no console/page errors. Scene CPU render samples fell from 4.1 / 2.9 ms to 1.9 / 1.1 ms at the measurement points. Adaptive resolution varied slightly between runs; the final run used 1.5 scaling on both clients. These are short local observations, not a locked 60 FPS guarantee.
+- The final native-GPU two-client smoke run passed create/join, all four quality tiers, synchronized countdown, keyboard driving, winner/results, rematch, leave and narrow layout with no page errors. Eight existing Node tests and the final production build pass. No new test files were created.
 
 ## NOT TESTED and practical limits
 

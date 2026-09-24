@@ -1,8 +1,9 @@
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import "@babylonjs/core/Meshes/thinInstanceMesh";
 import { predict } from "../../shared/driving.js";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { Scene } from "@babylonjs/core/scene";
-import { Vector3, Matrix } from "@babylonjs/core/Maths/math.vector";
+import { Vector3, Matrix, Quaternion } from "@babylonjs/core/Maths/math.vector";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
@@ -406,7 +407,8 @@ export function createScene(canvas, audioSystem = null) {
     box("board post south", 0.2, 2, 0.2, p.x, 1, p.z, metal);
   }
 
-  // Base palm tree prototype for GPU instancing
+  // One static GPU instance buffer per tree component keeps the palms out of
+  // the per-frame mesh visibility walk. Keep ordinary instances as a fallback.
   const baseTrunk = MeshBuilder.CreateCylinder(
     "baseTrunk",
     {
@@ -417,41 +419,77 @@ export function createScene(canvas, audioSystem = null) {
     },
     scene,
   );
-  baseTrunk.position.y = -100;
   baseTrunk.material = bark;
-  baseTrunk.isVisible = false;
 
-  const baseFronds = [];
-  for (let a = 0; a < 5; a++) {
-    const frond = MeshBuilder.CreateSphere(
-      "baseFrond",
-      { diameter: 1, segments: 4 },
-      scene,
-    );
-    frond.scaling.set(1.4, 0.35, 5.0);
-    frond.rotation.y = (a * Math.PI * 2) / 5;
-    frond.position.y = -100;
-    frond.material = leaf;
-    frond.isVisible = false;
-    baseFronds.push(frond);
-  }
+  const frondShape = [
+    [0, 0, 0.12],
+    [0.9, 0.2, 0.65],
+    [2.0, 0.12, 0.82],
+    [3.4, -0.4, 0.48],
+    [5.0, -1.25, 0.02],
+  ];
+  const baseFrond = MeshBuilder.CreateRibbon(
+    "palm frond",
+    {
+      pathArray: [-1, 1].map((side) =>
+        frondShape.map(([z, y, width]) => new Vector3(side * width, y, z)),
+      ),
+      sideOrientation: Mesh.DOUBLESIDE,
+    },
+    scene,
+  );
+  baseFrond.material = leaf;
 
+  const thinPalms = !!engine.getCaps().instancedArrays;
+  const palmGroups = new Map();
   function palm(x, z, scale = 1) {
+    if (thinPalms) {
+      const sector =
+        Math.floor(((Math.atan2(z, x) + Math.PI) * 8) / (2 * Math.PI)) % 8;
+      let group = palmGroups.get(sector);
+      if (!group) {
+        group = { trunks: [], fronds: [] };
+        palmGroups.set(sector, group);
+      }
+      group.trunks.push(
+        Matrix.Compose(
+          new Vector3(scale, scale, scale),
+          Quaternion.Identity(),
+          new Vector3(x, 3.75 * scale, z),
+        ),
+      );
+      for (let i = 0; i < 5; i++) {
+        const angle = (i * Math.PI * 2) / 5;
+        group.fronds.push(
+          Matrix.Compose(
+            new Vector3(scale, scale, scale),
+            Quaternion.RotationAxis(Vector3.Up(), angle),
+            new Vector3(
+              x + Math.sin(angle) * 1.8 * scale,
+              7.5 * scale,
+              z + Math.cos(angle) * 1.8 * scale,
+            ),
+          ),
+        );
+      }
+      return;
+    }
     const trunkInst = baseTrunk.createInstance("palm_" + x + "_" + z);
     trunkInst.position.set(x, 3.75 * scale, z);
     trunkInst.scaling.set(scale, scale, scale);
     if (shadowGen) shadowGen.addShadowCaster(trunkInst);
 
-    for (let i = 0; i < baseFronds.length; i++) {
-      const frondInst = baseFronds[i].createInstance(
+    for (let i = 0; i < 5; i++) {
+      const frondInst = baseFrond.createInstance(
         "frond_" + x + "_" + z + "_" + i,
       );
+      const angle = (i * Math.PI * 2) / 5;
       frondInst.position.set(
-        x + Math.sin(baseFronds[i].rotation.y) * 1.8 * scale,
+        x + Math.sin(angle) * 1.8 * scale,
         7.5 * scale,
-        z + Math.cos(baseFronds[i].rotation.y) * 1.8 * scale,
+        z + Math.cos(angle) * 1.8 * scale,
       );
-      frondInst.rotation.y = baseFronds[i].rotation.y;
+      frondInst.rotation.y = angle;
       frondInst.scaling.set(scale, scale, scale);
     }
   }
@@ -464,6 +502,28 @@ export function createScene(canvas, audioSystem = null) {
   for (let i = 0; i < 10; i++) {
     palm(20 + i * 18, -80 + (i % 3) * 35, 1.1 + (i % 2) * 0.2);
     palm(-50 + i * 14, -180 + (i % 2) * 30, 1.2);
+  }
+  if (thinPalms) {
+    // Make every regional source before giving any source its instance buffer.
+    const regions = [...palmGroups].map(([sector, group], index) => ({
+      group,
+      trunk: index ? baseTrunk.clone("palm trunks " + sector) : baseTrunk,
+      frond: index ? baseFrond.clone("palm fronds " + sector) : baseFrond,
+    }));
+    for (const { group, trunk, frond } of regions) {
+      for (const [mesh, matrices] of [
+        [trunk, group.trunks],
+        [frond, group.fronds],
+      ]) {
+        const buffer = new Float32Array(matrices.length * 16);
+        matrices.forEach((matrix, i) => matrix.copyToArray(buffer, i * 16));
+        mesh.thinInstanceSetBuffer("matrix", buffer, 16, true);
+        mesh.thinInstanceRefreshBoundingInfo();
+      }
+    }
+  } else {
+    baseTrunk.isVisible = false;
+    baseFrond.isVisible = false;
   }
 
   // Modern Pit Lane / Paddock complex along the main straight
@@ -493,6 +553,7 @@ export function createScene(canvas, audioSystem = null) {
       mesh.parent ||
       mesh.isAnInstance ||
       mesh.instances?.length ||
+      mesh.thinInstanceCount ||
       !mesh.isVisible ||
       !mesh.material ||
       gantryBulbs.includes(mesh)
@@ -579,6 +640,7 @@ export function createScene(canvas, audioSystem = null) {
     const root = new TransformNode(player.id, scene),
       chassis = new TransformNode(player.id + "_chassis", scene);
     chassis.parent = root;
+    chassis.position.y = -0.32;
 
     const paint = finish(player.id, player.color, 0.42, 0.22);
     const helmetPaint = finish("helmet_" + player.id, player.color, 0.55, 0.22);
@@ -1638,11 +1700,11 @@ export function createScene(canvas, audioSystem = null) {
         const onKerbZone = trackDist >= 9.8 && trackDist <= 11.6;
         if (onKerbZone && (t.speed || 0) > 7) {
           c.chassis.position.y =
-            0.28 +
+            -0.32 +
             Math.sin(now * 0.055) *
               Math.min(0.022, ((t.speed || 0) / 45) * 0.022);
         } else {
-          c.chassis.position.y += (0.28 - c.chassis.position.y) * alpha;
+          c.chassis.position.y += (-0.32 - c.chassis.position.y) * alpha;
         }
 
         // Wheel spinning & Ackermann steering geometry
@@ -1670,6 +1732,7 @@ export function createScene(canvas, audioSystem = null) {
       // A shared delayed contact timeline is primary; project residual interpolation overlap.
       const visible = [...cars.values()];
       for (let pass = 0; pass < 8; pass++) {
+        let corrected = false;
         for (let i = 0; i < visible.length; i++)
           for (let j = i + 1; j < visible.length; j++) {
             const a = visible[i].root,
@@ -1679,6 +1742,7 @@ export function createScene(canvas, audioSystem = null) {
               { x: b.position.x, z: b.position.z, yaw: b.rotation.y },
             );
             if (hit) {
+              corrected = true;
               const d = (hit.depth + 0.002) / 2;
               a.position.x -= hit.x * d;
               a.position.z -= hit.z * d;
@@ -1699,9 +1763,13 @@ export function createScene(canvas, audioSystem = null) {
             0.03;
           const side = (p.x - f.x) * nx + (p.z - f.z) * nz,
             excess = side - Math.max(-limit, Math.min(limit, side));
-          p.x -= nx * excess;
-          p.z -= nz * excess;
+          if (Math.abs(excess) > 1e-8) {
+            corrected = true;
+            p.x -= nx * excess;
+            p.z -= nz * excess;
+          }
         }
+        if (!corrected) break;
       }
 
       // Dynamic Chase Camera with look-ahead and speed FOV (ultra-stable 1fc22f6 geometry)
