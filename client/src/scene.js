@@ -1238,6 +1238,8 @@ export function createScene(canvas, audioSystem = null) {
         c.recovery = null;
         c.reconcile = null;
         c.prediction = null;
+        c.predictionMode = null;
+        c.handoff = null;
       }
       const at =
         performance.now() +
@@ -1273,7 +1275,7 @@ export function createScene(canvas, audioSystem = null) {
           const errX = currentPredX - motion.x;
           const errZ = currentPredZ - motion.z;
           const errDist = Math.hypot(errX, errZ);
-          if (errDist > 3.5 || (t.impact || 0) > 0.35) {
+          if (errDist > 8 || (t.impact || 0) > 0.35) {
             c.prediction = motion;
             c.reconcile = null;
           } else if (errDist > 0.025) {
@@ -1537,7 +1539,7 @@ export function createScene(canvas, audioSystem = null) {
         );
         const smoothYawT = tNorm;
         let displayYaw;
-        if (
+        const usePrediction =
           isMine &&
           currentPhase === "racing" &&
           t.finished === null &&
@@ -1548,8 +1550,8 @@ export function createScene(canvas, audioSystem = null) {
             (o) => o.id !== t.id && Math.hypot(o.x - t.x, o.z - t.z) < 12,
           ) &&
           nearest(t.x, t.z).distance < TRACK.width / 2 - 3 &&
-          !(t.impact > 0.05)
-        ) {
+          !(t.impact > 0.05);
+        if (usePrediction) {
           // Zero-latency client prediction for local player
           const age = Math.min(0.05, Math.max(0, (now - c.predictedAt) / 1000));
           let remaining = age;
@@ -1610,6 +1612,47 @@ export function createScene(canvas, audioSystem = null) {
           c.recovery.z *= Math.exp(-12 * dt);
           targetPosX += c.recovery.x;
           targetPosZ += c.recovery.z;
+        }
+        // Preserve visual continuity when contact/road proximity switches the
+        // local car between prediction and the authoritative delayed timeline.
+        if (
+          isMine &&
+          c.predictionMode !== null &&
+          c.predictionMode !== usePrediction &&
+          currentPhase === "racing" &&
+          t.finished === null &&
+          !localInput.reset &&
+          t.impact < 0.8
+        ) {
+          const dx = c.root.position.x - targetPosX;
+          const dz = c.root.position.z - targetPosZ;
+          const length = Math.hypot(dx, dz);
+          const scale = length > 8 ? 8 / length : 1;
+          c.handoff = {
+            x: dx * scale,
+            z: dz * scale,
+            yaw: Math.max(
+              -0.3,
+              Math.min(
+                0.3,
+                Math.atan2(
+                  Math.sin(c.root.rotation.y - displayYaw),
+                  Math.cos(c.root.rotation.y - displayYaw),
+                ),
+              ),
+            ),
+          };
+        }
+        c.predictionMode = isMine ? usePrediction : null;
+        if (c.handoff) {
+          const decay = Math.exp(-9 * dt);
+          c.handoff.x *= decay;
+          c.handoff.z *= decay;
+          c.handoff.yaw *= decay;
+          targetPosX += c.handoff.x;
+          targetPosZ += c.handoff.z;
+          displayYaw += c.handoff.yaw;
+          if (Math.hypot(c.handoff.x, c.handoff.z) < 0.01) c.handoff = null;
         }
         c.root.position.set(targetPosX, targetPosY, targetPosZ);
         c.root.rotation.y = displayYaw;

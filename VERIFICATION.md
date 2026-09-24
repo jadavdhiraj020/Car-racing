@@ -69,6 +69,14 @@ For manual multiplayer verification, create/join a room in two independent brows
 - In the paired two-client 1280 × 800 Chrome drive on this machine, the committed version averaged 18.67 / 18.63 ms per frame (p95 21.7 / 21.9 ms, 573 meshes). The final version averaged 17.59 / 17.53 ms (p95 20.6 / 20.8 ms, 253 meshes). Both clients reached 180 km/h with zero failed render frames and no console/page errors. Scene CPU render samples fell from 4.1 / 2.9 ms to 1.9 / 1.1 ms at the measurement points. Adaptive resolution varied slightly between runs; the final run used 1.5 scaling on both clients. These are short local observations, not a locked 60 FPS guarantee.
 - The final native-GPU two-client smoke run passed create/join, all four quality tiers, synchronized countdown, keyboard driving, winner/results, rematch, leave and narrow layout with no page errors. Eight existing Node tests and the final production build pass. No new test files were created.
 
+## 2026-09-24 driving-smoothness follow-up
+
+- Blended the local car's visual position and heading when nearby traffic or road edges switch it from client prediction to the authoritative timeline. Server collision separation still runs after this visual handoff. Expanded the range of small corrections that reconcile smoothly; hard impacts still snap to authoritative state.
+- Reduced repeated HUD text/style writes and updated clock text at 10 Hz between network snapshots.
+- In the same two-car, 1280 × 800 native-GPU Chrome handoff scenario, the largest sampled local-car movement was 2.10 m in a frame, versus 6.11 m before the change. The final run recorded a 13.9 ms median and 21.3 ms p95 frame interval over 409 frames, with zero failed render frames and no page errors. These are local observations, not a guarantee under every network condition.
+- Production build, eight existing Node tests, and the two-client browser smoke check passed. Both existing stress scripts passed in memory with native-GPU Chrome: five consecutive race/rematch cycles and all seven crash/contact/rejoin checks. No new test files were created.
+- The unmodified stress scripts' SwiftShader software-rendering runs timed out on browser click/countdown timing after earlier checks passed. A focused native-GPU pointer test confirmed rematch START works; the native-GPU stress runs completed.
+
 ## NOT TESTED and practical limits
 
 - Public deployment: NOT TESTED. No deployed URL was available. Render configuration, health route and same-origin networking remain intact; a Git push does not prove that a public deployment succeeded.

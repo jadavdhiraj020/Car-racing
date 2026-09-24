@@ -91,7 +91,7 @@ Cannon is a deliberate simplification: the server runs the same lightweight Java
 
 The client sends six boolean controls and an input sequence; it cannot submit position, laps, or results. The server advances physics at 60 ticks/second, accepts the next checkpoint only in the forward direction, and counts 24 gates per lap. Reset returns to the last accepted checkpoint without increasing progress. A car finishes at 72 crossings. Results appear when everyone remaining finishes, 60 seconds after the first finish, or at the 10-minute race limit. Unfinished drivers receive DNF. Finish times interpolate the crossing within a physics tick; roster order breaks exact ties.
 
-The browser uses a shared steering controller for fixed-step local prediction, acknowledges input sequences, and reconciles server corrections. Opponents interpolate on a shared synchronized timeline with a latency/jitter-aware buffer and limited extrapolation. Prediction yields to authoritative contacts near other cars and barriers. Sequenced snapshots are validated before reaching rendering, HUD or audio. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels that avoid HUD panels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
+The browser uses a shared steering controller for fixed-step local prediction, acknowledges input sequences, and reconciles server corrections. Opponents interpolate on a shared synchronized timeline with a latency/jitter-aware buffer and limited extrapolation. Prediction yields to authoritative contacts near other cars and barriers, with a short visual handoff to avoid a visible snap. Sequenced snapshots are validated before reaching rendering, HUD or audio. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels that avoid HUD panels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
 
 Disconnects immediately remove the driver and transfer host to the next remaining player. Empty rooms are deleted. Socket.IO reconnects transport automatically, but a disconnected driver must join the lobby again; mid-race joining/resuming is intentionally disabled. A host can rematch after results to reopen the lobby. Restarts and deploys erase all rooms.
 
@@ -629,6 +629,14 @@ For manual multiplayer verification, create/join a room in two independent brows
 - Short-circuited oriented visual contact projection when a pass makes no correction. It still allows all eight passes where cars or barriers actually need separation.
 - In the paired two-client 1280 × 800 Chrome drive on this machine, the committed version averaged 18.67 / 18.63 ms per frame (p95 21.7 / 21.9 ms, 573 meshes). The final version averaged 17.59 / 17.53 ms (p95 20.6 / 20.8 ms, 253 meshes). Both clients reached 180 km/h with zero failed render frames and no console/page errors. Scene CPU render samples fell from 4.1 / 2.9 ms to 1.9 / 1.1 ms at the measurement points. Adaptive resolution varied slightly between runs; the final run used 1.5 scaling on both clients. These are short local observations, not a locked 60 FPS guarantee.
 - The final native-GPU two-client smoke run passed create/join, all four quality tiers, synchronized countdown, keyboard driving, winner/results, rematch, leave and narrow layout with no page errors. Eight existing Node tests and the final production build pass. No new test files were created.
+
+## 2026-09-24 driving-smoothness follow-up
+
+- Blended the local car's visual position and heading when nearby traffic or road edges switch it from client prediction to the authoritative timeline. Server collision separation still runs after this visual handoff. Expanded the range of small corrections that reconcile smoothly; hard impacts still snap to authoritative state.
+- Reduced repeated HUD text/style writes and updated clock text at 10 Hz between network snapshots.
+- In the same two-car, 1280 × 800 native-GPU Chrome handoff scenario, the largest sampled local-car movement was 2.10 m in a frame, versus 6.11 m before the change. The final run recorded a 13.9 ms median and 21.3 ms p95 frame interval over 409 frames, with zero failed render frames and no page errors. These are local observations, not a guarantee under every network condition.
+- Production build, eight existing Node tests, and the two-client browser smoke check passed. Both existing stress scripts passed in memory with native-GPU Chrome: five consecutive race/rematch cycles and all seven crash/contact/rejoin checks. No new test files were created.
+- The unmodified stress scripts' SwiftShader software-rendering runs timed out on browser click/countdown timing after earlier checks passed. A focused native-GPU pointer test confirmed rematch START works; the native-GPU stress runs completed.
 
 ## NOT TESTED and practical limits
 
@@ -1854,6 +1862,8 @@ let clockKnown = false,
   inputHistory = [],
   lastRender = 0,
   lastMap = 0,
+  lastHudUpdate = 0,
+  lastRpmStyle = "",
   uiSignature = "";
 function syncClock() {
   if (!socket.connected) return;
@@ -2040,6 +2050,14 @@ const esc = (s) =>
   );
 
 const htmlCache = new Map();
+const textCache = new Map();
+function setText(id, value) {
+  const text = String(value);
+  if (textCache.get(id) !== text) {
+    $(id).textContent = text;
+    textCache.set(id, text);
+  }
+}
 function setHtml(id, html) {
   if (htmlCache.get(id) !== html) {
     $(id).innerHTML = html;
@@ -2326,7 +2344,7 @@ function updateCountdown() {
         ? "GO!"
         : "";
   if (count !== lastCountdown) {
-    $("countdown").textContent = count;
+    setText("countdown", count);
     lastCountdown = count;
     $("countdown").classList.remove("pulse");
     void $("countdown").offsetWidth;
@@ -2345,18 +2363,18 @@ function updateCountdown() {
       else if (elapsed >= -1200) litCount = 4;
       else if (elapsed >= -1800) litCount = 3;
       else if (elapsed >= -2400) litCount = 2;
-      gantryHud.querySelectorAll("i").forEach((dot, idx) => {
-        dot.className = idx < litCount ? "lit" : "";
-      });
       if (litCount !== lastGantryStep) {
+        gantryHud.querySelectorAll("i").forEach((dot, idx) => {
+          dot.className = idx < litCount ? "lit" : "";
+        });
         if (sound) engineAudio.countdownLight(litCount);
         lastGantryStep = litCount;
       }
     } else if (isJustStarted) {
-      gantryHud.querySelectorAll("i").forEach((dot) => {
-        dot.className = "green";
-      });
       if (lastGantryStep !== 0) {
+        gantryHud.querySelectorAll("i").forEach((dot) => {
+          dot.className = "green";
+        });
         if (sound) engineAudio.countdownLight(0);
         lastGantryStep = 0;
       }
@@ -2368,26 +2386,30 @@ function updateCountdown() {
 
 function updateHud() {
   if (!state) return;
+  lastHudUpdate = performance.now();
   const now = Date.now() + offset,
     elapsed = now - state.startAt;
   updateCountdown();
   const c = state.cars.find((c) => c.id === socket.id);
   if (!c) return;
-  $("lap").textContent =
-    `${Math.min(3, Math.floor((c.passed || 0) / 24) + 1)} / 3`;
-  $("position").textContent =
-    `${ordered().findIndex((p) => p.id === c.id) + 1} / ${state.players.length}`;
+  setText("lap", `${Math.min(3, Math.floor((c.passed || 0) / 24) + 1)} / 3`);
+  setText(
+    "position",
+    `${ordered().findIndex((p) => p.id === c.id) + 1} / ${state.players.length}`,
+  );
   const safeSpeed = Number.isFinite(c.speed)
     ? Math.max(0, Math.round(c.speed * 3.6))
     : 0;
-  $("speed").textContent = safeSpeed;
-  $("timer").textContent = time(c.finished ?? elapsed);
-  $("finishMessage").textContent =
+  setText("speed", safeSpeed);
+  setText("timer", time(c.finished ?? elapsed));
+  setText(
+    "finishMessage",
     c.finished !== null
       ? "FINISHED · Waiting for the rest of the grid"
       : state.endAt
         ? `Finish window: ${Math.max(0, Math.ceil((state.endAt - now) / 1000))}s`
-        : "";
+        : "",
+  );
 }
 
 function frame() {
@@ -2401,7 +2423,7 @@ function frame() {
     }
     const c = state.cars.find((c) => c.id === socket.id);
     if (!c) return;
-    updateHud();
+    if (performance.now() - lastHudUpdate > 100) updateHud();
 
     // Dynamic engine audio & kerb rumble updates
     const safeX = Number.isFinite(c.x) ? c.x : 0;
@@ -2422,15 +2444,21 @@ function frame() {
       if (sound) engineAudio.impact(Number.isFinite(c.impact) ? c.impact : 0);
     } catch {}
 
-    $("gear").textContent =
+    setText(
+      "gear",
       keys.down && (c.speed || 0) < 2
         ? "R"
         : state.phase !== "racing"
           ? "N"
-          : engineAudio.gear || "1";
+          : engineAudio.gear || "1",
+    );
     const safeRpm = Number.isFinite(engineAudio?.rpm) ? engineAudio.rpm : 1000;
     const rpmPercent = Math.min(100, Math.max(0, (safeRpm / 13500) * 100));
-    $("rpm").style.setProperty("--rpm", rpmPercent.toFixed(1));
+    const rpmStyle = rpmPercent.toFixed(1);
+    if (rpmStyle !== lastRpmStyle) {
+      $("rpm").style.setProperty("--rpm", rpmStyle);
+      lastRpmStyle = rpmStyle;
+    }
     $("rpm").classList.toggle("shift-blink", safeRpm > 12400);
     view?.input(keys, inputHistory);
     if (performance.now() - lastMap < 50) return;
@@ -3824,6 +3852,8 @@ export function createScene(canvas, audioSystem = null) {
         c.recovery = null;
         c.reconcile = null;
         c.prediction = null;
+        c.predictionMode = null;
+        c.handoff = null;
       }
       const at =
         performance.now() +
@@ -3859,7 +3889,7 @@ export function createScene(canvas, audioSystem = null) {
           const errX = currentPredX - motion.x;
           const errZ = currentPredZ - motion.z;
           const errDist = Math.hypot(errX, errZ);
-          if (errDist > 3.5 || (t.impact || 0) > 0.35) {
+          if (errDist > 8 || (t.impact || 0) > 0.35) {
             c.prediction = motion;
             c.reconcile = null;
           } else if (errDist > 0.025) {
@@ -4123,7 +4153,7 @@ export function createScene(canvas, audioSystem = null) {
         );
         const smoothYawT = tNorm;
         let displayYaw;
-        if (
+        const usePrediction =
           isMine &&
           currentPhase === "racing" &&
           t.finished === null &&
@@ -4134,8 +4164,8 @@ export function createScene(canvas, audioSystem = null) {
             (o) => o.id !== t.id && Math.hypot(o.x - t.x, o.z - t.z) < 12,
           ) &&
           nearest(t.x, t.z).distance < TRACK.width / 2 - 3 &&
-          !(t.impact > 0.05)
-        ) {
+          !(t.impact > 0.05);
+        if (usePrediction) {
           // Zero-latency client prediction for local player
           const age = Math.min(0.05, Math.max(0, (now - c.predictedAt) / 1000));
           let remaining = age;
@@ -4196,6 +4226,47 @@ export function createScene(canvas, audioSystem = null) {
           c.recovery.z *= Math.exp(-12 * dt);
           targetPosX += c.recovery.x;
           targetPosZ += c.recovery.z;
+        }
+        // Preserve visual continuity when contact/road proximity switches the
+        // local car between prediction and the authoritative delayed timeline.
+        if (
+          isMine &&
+          c.predictionMode !== null &&
+          c.predictionMode !== usePrediction &&
+          currentPhase === "racing" &&
+          t.finished === null &&
+          !localInput.reset &&
+          t.impact < 0.8
+        ) {
+          const dx = c.root.position.x - targetPosX;
+          const dz = c.root.position.z - targetPosZ;
+          const length = Math.hypot(dx, dz);
+          const scale = length > 8 ? 8 / length : 1;
+          c.handoff = {
+            x: dx * scale,
+            z: dz * scale,
+            yaw: Math.max(
+              -0.3,
+              Math.min(
+                0.3,
+                Math.atan2(
+                  Math.sin(c.root.rotation.y - displayYaw),
+                  Math.cos(c.root.rotation.y - displayYaw),
+                ),
+              ),
+            ),
+          };
+        }
+        c.predictionMode = isMine ? usePrediction : null;
+        if (c.handoff) {
+          const decay = Math.exp(-9 * dt);
+          c.handoff.x *= decay;
+          c.handoff.z *= decay;
+          c.handoff.yaw *= decay;
+          targetPosX += c.handoff.x;
+          targetPosZ += c.handoff.z;
+          displayYaw += c.handoff.yaw;
+          if (Math.hypot(c.handoff.x, c.handoff.z) < 0.01) c.handoff = null;
         }
         c.root.position.set(targetPosX, targetPosY, targetPosZ);
         c.root.rotation.y = displayYaw;
