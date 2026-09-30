@@ -85,6 +85,13 @@ For manual multiplayer verification, create/join a room in two independent brows
 - Production build, eight existing Node tests, two-client browser smoke check, and the native-GPU crash/contact/rematch/rejoin stress run passed with zero browser errors. No new test file was added.
 - Loopback checks cannot quantify delay between friends on different networks. Hosting region, connection quality, and browser hardware can still affect perceived lag.
 
+## 2026-09-30 remote-motion and frame-pacing follow-up
+
+- Replaced the clock-ping standard deviation with a bounded interquartile jitter estimate and added quick clock samples after connection. This prevents occasional slow browser callbacks from adding large, persistent remote-car delay. In local two-client runs, the interpolation buffer fell from about 110 ms to 55 ms under normal load; under a heavier run it stayed at 62–91 ms instead of 160–180 ms. Browser and machine load varied between runs, so these are observations rather than controlled FPS comparisons.
+- Used authoritative server timestamps to distinguish late packets from implausible position jumps. Limited remote visual catch-up to 75 m/s while preserving server positions and the existing final visual collision projection. In the same 400 ms snapshot-gap scenario, the largest sampled remote movement fell from 301 m/s apparent speed to 87 m/s; a separate 650 ms gap reached 93 m/s, with no render errors. Irregular browser frame timing can make sampled rates exceed the per-render limit slightly.
+- Made adaptive resolution react after 2 seconds instead of 4 when frame time exceeds 20 ms, and guarded camera velocity against a zero-duration frame. Resolution reached its medium-quality cap during one heavily loaded two-client run; the measured mean remained 27–32 ms, so this machine did not hold 60 FPS with two simultaneous clients.
+- Production build, eight existing Node tests, native-GPU two-client browser smoke run, crash/contact/rejoin stress run, and five race/rematch cycles passed. The unmodified software-rendered browser check timed out at rematch while Chrome was heavily loaded; the equivalent native-GPU run passed. No new test files were created.
+
 ## NOT TESTED and practical limits
 
 - Public deployment: NOT TESTED. No deployed URL was available. Render configuration, health route and same-origin networking remain intact; a Git push does not prove that a public deployment succeeded.

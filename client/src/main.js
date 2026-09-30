@@ -61,9 +61,12 @@ window.__getKeys = () => ({ ...keys });
 window.__getDiagnostics = () => ({
   render: view?.metrics(),
   audio: engineAudio.metrics?.(),
+  network: { rttMs: networkRtt, jitterMs: networkJitter, offsetMs: offset },
 });
 let clockKnown = false,
   clockSamples = [],
+  networkRtt = 0,
+  networkJitter = 0,
   inputSeq = 0,
   inputHistory = [],
   lastRender = 0,
@@ -82,16 +85,24 @@ function syncClock() {
       offset: serverTime - (start + end) / 2,
     });
     clockSamples = clockSamples.slice(-16);
-    const best = [...clockSamples].sort((a, b) => a.rtt - b.rtt)[0];
-    offset = best.offset;
+    const sorted = [...clockSamples].sort((a, b) => a.rtt - b.rtt);
+    const best = sorted[0];
+    // A delayed browser callback is not sustained network jitter. Ease small
+    // clock corrections to keep the shared interpolation timeline continuous.
+    const correction = best.offset - offset;
+    const muchBetterSample = networkRtt > 0 && best.rtt < networkRtt * 0.7;
+    offset =
+      !clockKnown || muchBetterSample || Math.abs(correction) > 500
+        ? best.offset
+        : offset + Math.max(-12, Math.min(12, correction));
     clockKnown = true;
-    const meanRtt =
-      clockSamples.reduce((acc, s) => acc + s.rtt, 0) / clockSamples.length;
-    const variance =
-      clockSamples.reduce((acc, s) => acc + (s.rtt - meanRtt) ** 2, 0) /
-      clockSamples.length;
-    const stdDev = Math.sqrt(variance);
-    view?.network(offset, best.rtt, stdDev);
+    // The interquartile range ignores one-off render stalls yet tracks normal
+    // variation. A single slow ping previously inflated the buffer for 80 s.
+    const q1 = sorted[Math.floor((sorted.length - 1) * 0.25)].rtt;
+    const q3 = sorted[Math.floor((sorted.length - 1) * 0.75)].rtt;
+    networkRtt = best.rtt;
+    networkJitter = sorted.length >= 4 ? Math.min(30, (q3 - q1) / 1.349) : 0;
+    view?.network(offset, networkRtt, networkJitter);
   });
 }
 setInterval(syncClock, 5000);
@@ -221,7 +232,11 @@ socket.on("connect", () => {
   inputHistory = [];
   clockKnown = false;
   clockSamples = [];
+  networkRtt = 0;
+  networkJitter = 0;
   syncClock();
+  setTimeout(syncClock, 350);
+  setTimeout(syncClock, 1200);
 });
 
 socket.on("disconnect", () => {
@@ -375,7 +390,10 @@ socket.on("state", (s) => {
     return;
   engineAudio.setPhase(s.phase);
   state = s;
-  if (!clockKnown) offset = s.serverNow - Date.now();
+  if (!clockKnown) {
+    offset = s.serverNow - Date.now();
+    view?.network(offset, 0, 0);
+  }
   updateHud();
   try {
     view?.update(s, socket.id);

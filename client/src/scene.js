@@ -1218,12 +1218,20 @@ export function createScene(canvas, audioSystem = null) {
     for (const t of targets) {
       const c = cars.get(t.id);
       if (!c) continue;
+      const at =
+        performance.now() +
+        ((state.serverNow || Date.now()) - (Date.now() + serverOffset));
       const phaseReset =
         currentPhase !== state.phase &&
         (state.phase === "countdown" || state.phase === "lobby");
+      const previousSample = c.samples.at(-1);
+      const sampleGap = previousSample
+        ? Math.max(0, state.serverNow - previousSample.serverNow)
+        : 0;
       const distJump =
-        c.samples.length > 0 &&
-        Math.hypot(c.samples.at(-1).x - t.x, c.samples.at(-1).z - t.z) > 18;
+        previousSample &&
+        Math.hypot(previousSample.x - t.x, previousSample.z - t.z) >
+          Math.max(18, (55 * sampleGap) / 1000 + 3);
       if (
         !c.target ||
         c.target.respawn !== t.respawn ||
@@ -1241,9 +1249,6 @@ export function createScene(canvas, audioSystem = null) {
         c.predictionMode = null;
         c.handoff = null;
       }
-      const at =
-        performance.now() +
-        ((state.serverNow || Date.now()) - (Date.now() + serverOffset));
       if (t.id === id) {
         const motion = { ...t };
         const horizon = Math.max(
@@ -1291,11 +1296,11 @@ export function createScene(canvas, audioSystem = null) {
         }
         c.predictedAt = performance.now();
       }
-      if (c.samples.length && at - c.samples.at(-1).at > 250)
+      if (c.samples.length && sampleGap > 250)
         c.recovery = { x: c.root.position.x - t.x, z: c.root.position.z - t.z };
       const lastAt = c.samples.length ? c.samples.at(-1).at : -Infinity;
       const safeAt = Math.max(lastAt + 1, at);
-      c.samples.push({ ...t, at: safeAt });
+      c.samples.push({ ...t, at: safeAt, serverNow: state.serverNow });
       if (c.samples.length > 12) c.samples.shift();
       c.target = t;
     }
@@ -1397,13 +1402,13 @@ export function createScene(canvas, audioSystem = null) {
         qualitySum += elapsed;
         qualityFrames++;
       }
-      if (qualityElapsed > 4) {
+      if (qualityElapsed > 2) {
         const mean = qualitySum / Math.max(1, qualityFrames),
           base = qualityScales[qualityLevel];
         const next =
-          mean > 0.022
-            ? Math.min(base + 0.6, resolution + 0.15)
-            : mean < 0.016
+          mean > 0.02
+            ? Math.min(base + 0.7, resolution + 0.2)
+            : mean < 0.015
               ? Math.max(base, resolution - 0.1)
               : resolution;
         if (Math.abs(next - resolution) > 0.05) {
@@ -1654,6 +1659,20 @@ export function createScene(canvas, audioSystem = null) {
           displayYaw += c.handoff.yaw;
           if (Math.hypot(c.handoff.x, c.handoff.z) < 0.01) c.handoff = null;
         }
+        // A delayed batch of snapshots must not make an opponent appear to
+        // teleport while catching up. Respawns/phase resets already place the
+        // root directly on the new authoritative position above.
+        if (!isMine && c.samples.length > 1) {
+          const dx = targetPosX - c.root.position.x;
+          const dz = targetPosZ - c.root.position.z;
+          const distance = Math.hypot(dx, dz);
+          const maxStep = 75 * dt;
+          if (distance > maxStep && maxStep > 0) {
+            const scale = maxStep / distance;
+            targetPosX = c.root.position.x + dx * scale;
+            targetPosZ = c.root.position.z + dz * scale;
+          }
+        }
         c.root.position.set(targetPosX, targetPosY, targetPosZ);
         c.root.rotation.y = displayYaw;
 
@@ -1857,8 +1876,8 @@ export function createScene(canvas, audioSystem = null) {
           camera.position.copyFrom(desired);
         }
 
-        cameraVel.x = (camera.position.x - prevCamX) / dt;
-        cameraVel.z = (camera.position.z - prevCamZ) / dt;
+        cameraVel.x = dt > 0 ? (camera.position.x - prevCamX) / dt : 0;
+        cameraVel.z = dt > 0 ? (camera.position.z - prevCamZ) / dt : 0;
 
         // Look-ahead target anticipates corners
         const lookDist = 7.5 + Math.min(5.0, speed * 0.1);

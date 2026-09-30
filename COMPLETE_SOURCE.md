@@ -91,7 +91,7 @@ Cannon is a deliberate simplification: the server runs the same lightweight Java
 
 The client sends six boolean controls and an input sequence; it cannot submit position, laps, or results. The server advances physics at 60 ticks/second, accepts the next checkpoint only in the forward direction, and counts 24 gates per lap. Reset returns to the last accepted checkpoint without increasing progress. A car finishes at 72 crossings. Results appear when everyone remaining finishes, 60 seconds after the first finish, or at the 10-minute race limit. Unfinished drivers receive DNF. Finish times interpolate the crossing within a physics tick; roster order breaks exact ties.
 
-The browser uses a shared steering controller for fixed-step local prediction, acknowledges input sequences, and reconciles server corrections. Key presses and releases use reliable Socket.IO delivery; unchanged periodic input updates may be dropped under congestion. Opponents interpolate on a shared synchronized timeline with a latency/jitter-aware buffer and limited extrapolation. Prediction yields to authoritative contacts near other cars and barriers, with a short visual handoff to avoid a visible snap. Sequenced snapshots are validated before reaching rendering, HUD or audio. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels that avoid HUD panels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
+The browser uses a shared steering controller for fixed-step local prediction, acknowledges input sequences, and reconciles server corrections. Key presses and releases use reliable Socket.IO delivery; unchanged periodic input updates may be dropped under congestion. Opponents interpolate on a shared synchronized timeline with a bounded jitter buffer, limited extrapolation, and speed-limited visual catch-up after missing snapshots. Prediction yields to authoritative contacts near other cars and barriers, with a short visual handoff to avoid a visible snap. Sequenced snapshots are validated before reaching rendering, HUD or audio. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels that avoid HUD panels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
 
 Disconnects immediately remove the driver and transfer host to the next remaining player. Empty rooms are deleted. Socket.IO reconnects transport automatically, but a disconnected driver must join the lobby again; mid-race joining/resuming is intentionally disabled. A host can rematch after results to reopen the lobby. Restarts and deploys erase all rooms.
 
@@ -645,6 +645,13 @@ For manual multiplayer verification, create/join a room in two independent brows
 - In a five-transition local two-client Chrome check, key changes reached the server in 10–77 ms and appeared in the other client's snapshots in 40–140 ms. This includes browser scheduling on the test machine, not internet latency or the remote render buffer.
 - Production build, eight existing Node tests, two-client browser smoke check, and the native-GPU crash/contact/rematch/rejoin stress run passed with zero browser errors. No new test file was added.
 - Loopback checks cannot quantify delay between friends on different networks. Hosting region, connection quality, and browser hardware can still affect perceived lag.
+
+## 2026-09-30 remote-motion and frame-pacing follow-up
+
+- Replaced the clock-ping standard deviation with a bounded interquartile jitter estimate and added quick clock samples after connection. This prevents occasional slow browser callbacks from adding large, persistent remote-car delay. In local two-client runs, the interpolation buffer fell from about 110 ms to 55 ms under normal load; under a heavier run it stayed at 62–91 ms instead of 160–180 ms. Browser and machine load varied between runs, so these are observations rather than controlled FPS comparisons.
+- Used authoritative server timestamps to distinguish late packets from implausible position jumps. Limited remote visual catch-up to 75 m/s while preserving server positions and the existing final visual collision projection. In the same 400 ms snapshot-gap scenario, the largest sampled remote movement fell from 301 m/s apparent speed to 87 m/s; a separate 650 ms gap reached 93 m/s, with no render errors. Irregular browser frame timing can make sampled rates exceed the per-render limit slightly.
+- Made adaptive resolution react after 2 seconds instead of 4 when frame time exceeds 20 ms, and guarded camera velocity against a zero-duration frame. Resolution reached its medium-quality cap during one heavily loaded two-client run; the measured mean remained 27–32 ms, so this machine did not hold 60 FPS with two simultaneous clients.
+- Production build, eight existing Node tests, native-GPU two-client browser smoke run, crash/contact/rejoin stress run, and five race/rematch cycles passed. The unmodified software-rendered browser check timed out at rematch while Chrome was heavily loaded; the equivalent native-GPU run passed. No new test files were created.
 
 ## NOT TESTED and practical limits
 
@@ -1863,9 +1870,12 @@ window.__getKeys = () => ({ ...keys });
 window.__getDiagnostics = () => ({
   render: view?.metrics(),
   audio: engineAudio.metrics?.(),
+  network: { rttMs: networkRtt, jitterMs: networkJitter, offsetMs: offset },
 });
 let clockKnown = false,
   clockSamples = [],
+  networkRtt = 0,
+  networkJitter = 0,
   inputSeq = 0,
   inputHistory = [],
   lastRender = 0,
@@ -1884,16 +1894,24 @@ function syncClock() {
       offset: serverTime - (start + end) / 2,
     });
     clockSamples = clockSamples.slice(-16);
-    const best = [...clockSamples].sort((a, b) => a.rtt - b.rtt)[0];
-    offset = best.offset;
+    const sorted = [...clockSamples].sort((a, b) => a.rtt - b.rtt);
+    const best = sorted[0];
+    // A delayed browser callback is not sustained network jitter. Ease small
+    // clock corrections to keep the shared interpolation timeline continuous.
+    const correction = best.offset - offset;
+    const muchBetterSample = networkRtt > 0 && best.rtt < networkRtt * 0.7;
+    offset =
+      !clockKnown || muchBetterSample || Math.abs(correction) > 500
+        ? best.offset
+        : offset + Math.max(-12, Math.min(12, correction));
     clockKnown = true;
-    const meanRtt =
-      clockSamples.reduce((acc, s) => acc + s.rtt, 0) / clockSamples.length;
-    const variance =
-      clockSamples.reduce((acc, s) => acc + (s.rtt - meanRtt) ** 2, 0) /
-      clockSamples.length;
-    const stdDev = Math.sqrt(variance);
-    view?.network(offset, best.rtt, stdDev);
+    // The interquartile range ignores one-off render stalls yet tracks normal
+    // variation. A single slow ping previously inflated the buffer for 80 s.
+    const q1 = sorted[Math.floor((sorted.length - 1) * 0.25)].rtt;
+    const q3 = sorted[Math.floor((sorted.length - 1) * 0.75)].rtt;
+    networkRtt = best.rtt;
+    networkJitter = sorted.length >= 4 ? Math.min(30, (q3 - q1) / 1.349) : 0;
+    view?.network(offset, networkRtt, networkJitter);
   });
 }
 setInterval(syncClock, 5000);
@@ -2023,7 +2041,11 @@ socket.on("connect", () => {
   inputHistory = [];
   clockKnown = false;
   clockSamples = [];
+  networkRtt = 0;
+  networkJitter = 0;
   syncClock();
+  setTimeout(syncClock, 350);
+  setTimeout(syncClock, 1200);
 });
 
 socket.on("disconnect", () => {
@@ -2177,7 +2199,10 @@ socket.on("state", (s) => {
     return;
   engineAudio.setPhase(s.phase);
   state = s;
-  if (!clockKnown) offset = s.serverNow - Date.now();
+  if (!clockKnown) {
+    offset = s.serverNow - Date.now();
+    view?.network(offset, 0, 0);
+  }
   updateHud();
   try {
     view?.update(s, socket.id);
@@ -3843,12 +3868,20 @@ export function createScene(canvas, audioSystem = null) {
     for (const t of targets) {
       const c = cars.get(t.id);
       if (!c) continue;
+      const at =
+        performance.now() +
+        ((state.serverNow || Date.now()) - (Date.now() + serverOffset));
       const phaseReset =
         currentPhase !== state.phase &&
         (state.phase === "countdown" || state.phase === "lobby");
+      const previousSample = c.samples.at(-1);
+      const sampleGap = previousSample
+        ? Math.max(0, state.serverNow - previousSample.serverNow)
+        : 0;
       const distJump =
-        c.samples.length > 0 &&
-        Math.hypot(c.samples.at(-1).x - t.x, c.samples.at(-1).z - t.z) > 18;
+        previousSample &&
+        Math.hypot(previousSample.x - t.x, previousSample.z - t.z) >
+          Math.max(18, (55 * sampleGap) / 1000 + 3);
       if (
         !c.target ||
         c.target.respawn !== t.respawn ||
@@ -3866,9 +3899,6 @@ export function createScene(canvas, audioSystem = null) {
         c.predictionMode = null;
         c.handoff = null;
       }
-      const at =
-        performance.now() +
-        ((state.serverNow || Date.now()) - (Date.now() + serverOffset));
       if (t.id === id) {
         const motion = { ...t };
         const horizon = Math.max(
@@ -3916,11 +3946,11 @@ export function createScene(canvas, audioSystem = null) {
         }
         c.predictedAt = performance.now();
       }
-      if (c.samples.length && at - c.samples.at(-1).at > 250)
+      if (c.samples.length && sampleGap > 250)
         c.recovery = { x: c.root.position.x - t.x, z: c.root.position.z - t.z };
       const lastAt = c.samples.length ? c.samples.at(-1).at : -Infinity;
       const safeAt = Math.max(lastAt + 1, at);
-      c.samples.push({ ...t, at: safeAt });
+      c.samples.push({ ...t, at: safeAt, serverNow: state.serverNow });
       if (c.samples.length > 12) c.samples.shift();
       c.target = t;
     }
@@ -4022,13 +4052,13 @@ export function createScene(canvas, audioSystem = null) {
         qualitySum += elapsed;
         qualityFrames++;
       }
-      if (qualityElapsed > 4) {
+      if (qualityElapsed > 2) {
         const mean = qualitySum / Math.max(1, qualityFrames),
           base = qualityScales[qualityLevel];
         const next =
-          mean > 0.022
-            ? Math.min(base + 0.6, resolution + 0.15)
-            : mean < 0.016
+          mean > 0.02
+            ? Math.min(base + 0.7, resolution + 0.2)
+            : mean < 0.015
               ? Math.max(base, resolution - 0.1)
               : resolution;
         if (Math.abs(next - resolution) > 0.05) {
@@ -4279,6 +4309,20 @@ export function createScene(canvas, audioSystem = null) {
           displayYaw += c.handoff.yaw;
           if (Math.hypot(c.handoff.x, c.handoff.z) < 0.01) c.handoff = null;
         }
+        // A delayed batch of snapshots must not make an opponent appear to
+        // teleport while catching up. Respawns/phase resets already place the
+        // root directly on the new authoritative position above.
+        if (!isMine && c.samples.length > 1) {
+          const dx = targetPosX - c.root.position.x;
+          const dz = targetPosZ - c.root.position.z;
+          const distance = Math.hypot(dx, dz);
+          const maxStep = 75 * dt;
+          if (distance > maxStep && maxStep > 0) {
+            const scale = maxStep / distance;
+            targetPosX = c.root.position.x + dx * scale;
+            targetPosZ = c.root.position.z + dz * scale;
+          }
+        }
         c.root.position.set(targetPosX, targetPosY, targetPosZ);
         c.root.rotation.y = displayYaw;
 
@@ -4482,8 +4526,8 @@ export function createScene(canvas, audioSystem = null) {
           camera.position.copyFrom(desired);
         }
 
-        cameraVel.x = (camera.position.x - prevCamX) / dt;
-        cameraVel.z = (camera.position.z - prevCamZ) / dt;
+        cameraVel.x = dt > 0 ? (camera.position.x - prevCamX) / dt : 0;
+        cameraVel.z = dt > 0 ? (camera.position.z - prevCamZ) / dt : 0;
 
         // Look-ahead target anticipates corners
         const lookDist = 7.5 + Math.min(5.0, speed * 0.1);
