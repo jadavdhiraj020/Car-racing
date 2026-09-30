@@ -89,7 +89,7 @@ A complete racing project for solo testing or friends: Babylon.js graphics, an a
 
 Cannon is a deliberate simplification: the server runs the same lightweight JavaScript simulation without a browser or WASM setup, and Babylon renders its results. Havok is not required or bundled. Cannon is MIT licensed: https://github.com/pmndrs/cannon-es. Cars, ground and barriers collide on the server. Two physics substeps plus oriented contact projection keep cars separated, including beside barriers. Low-speed barrier recovery turns a throttling car back toward the road when its nose stays pressed against a wall. Handling is an arcade simulation; suspension and body weight transfer are visual approximations.
 
-The client sends six boolean controls and an input sequence; it cannot submit position, laps, or results. The server advances physics at 60 ticks/second, accepts the next checkpoint only in the forward direction, and counts 24 gates per lap. Reset returns to the last accepted checkpoint without increasing progress. A car finishes at 72 crossings. Results appear when everyone remaining finishes, 60 seconds after the first finish, or at the 10-minute race limit. Unfinished drivers receive DNF. Finish times interpolate the crossing within a physics tick; roster order breaks exact ties.
+The client sends six boolean controls and an input sequence; it cannot submit position, laps, or results. The server advances physics at 60 ticks/second and caps catch-up work to five steps per callback, preventing a persistent backlog when the CPU is overloaded. It accepts the next checkpoint only in the forward direction and counts 24 gates per lap. Reset returns to the last accepted checkpoint without increasing progress. A car finishes at 72 crossings. Results appear when everyone remaining finishes, 60 seconds after the first finish, or at the 10-minute race limit. Unfinished drivers receive DNF. Finish times interpolate the crossing within a physics tick; roster order breaks exact ties.
 
 The browser uses a shared steering controller for fixed-step local prediction, acknowledges input sequences, and reconciles server corrections. Key presses and releases use reliable Socket.IO delivery; unchanged periodic input updates may be dropped under congestion. High-rate race snapshots may also be dropped under congestion, with reliable keyframes about every 233 ms. Opponents interpolate on a shared synchronized timeline with a bounded jitter buffer, limited extrapolation, and speed-limited visual catch-up after missing snapshots. Prediction yields to authoritative contacts near other cars and barriers, with a short visual handoff to avoid a visible snap. Sequenced snapshots are validated before reaching rendering, HUD or audio. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels that avoid HUD panels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
 
@@ -672,6 +672,12 @@ For manual multiplayer verification, create/join a room in two independent brows
 
 - A room host can start with one driver. The regular countdown, authoritative physics, checkpoints, three laps, results and rematch are reused; the lobby now offers a solo test race instead of disabling START.
 - The existing Socket.IO integration test now covers solo start, finish and rematch before its two-player race. All eight Node tests and the production build passed. A native-GPU Chrome solo flow passed START, the 1 / 1 position HUD, results (using a server-side finish fixture) and rematch with no page errors. The existing two-browser Chrome smoke check also passed with no page errors. No new test files were created.
+
+## 2026-09-30 server timing follow-up
+
+- The fixed-step server loop previously capped each observed delay at 100 ms and executed at most five physics steps per callback, but did not cap accumulated debt. Under sustained overload, the authoritative simulation could keep falling further behind wall time.
+- An inline probe added 24 ms of CPU work to each physics step for a solo race. Before the cap, the last sampled simulation timestamp lagged wall time by 371 ms after 2.5 seconds (438 ms maximum). With the accumulator capped to five steps, the same probe ended at 24 ms lag (91 ms maximum). No test file was created. This bound prevents a stale queue; it cannot maintain full-speed physics or low browser latency when the server CPU is overloaded.
+- All eight Node tests, the production build, a native-GPU two-browser smoke run, all seven crash/contact/rejoin stress scenarios, and five consecutive race/rematch cycles passed after the change. No new test files were created.
 
 ## NOT TESTED and practical limits
 
@@ -9465,7 +9471,13 @@ export async function createGame({ dev = false } = {}) {
     accumulator = 0;
   const interval = setInterval(() => {
     const mono = performance.now();
-    accumulator += Math.min(0.1, (mono - lastTick) / 1000);
+    // Do not let sustained CPU overload build an ever-older physics queue.
+    // Five fixed steps are the most this callback can execute; discard older
+    // debt so authoritative positions and timestamps stay close to wall time.
+    accumulator = Math.min(
+      5 / 60,
+      accumulator + Math.max(0, (mono - lastTick) / 1000),
+    );
     lastTick = mono;
     let steps = 0;
     while (accumulator >= 1 / 60 && steps < 5) {

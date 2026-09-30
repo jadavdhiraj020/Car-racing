@@ -108,6 +108,12 @@ For manual multiplayer verification, create/join a room in two independent brows
 - A room host can start with one driver. The regular countdown, authoritative physics, checkpoints, three laps, results and rematch are reused; the lobby now offers a solo test race instead of disabling START.
 - The existing Socket.IO integration test now covers solo start, finish and rematch before its two-player race. All eight Node tests and the production build passed. A native-GPU Chrome solo flow passed START, the 1 / 1 position HUD, results (using a server-side finish fixture) and rematch with no page errors. The existing two-browser Chrome smoke check also passed with no page errors. No new test files were created.
 
+## 2026-09-30 server timing follow-up
+
+- The fixed-step server loop previously capped each observed delay at 100 ms and executed at most five physics steps per callback, but did not cap accumulated debt. Under sustained overload, the authoritative simulation could keep falling further behind wall time.
+- An inline probe added 24 ms of CPU work to each physics step for a solo race. Before the cap, the last sampled simulation timestamp lagged wall time by 371 ms after 2.5 seconds (438 ms maximum). With the accumulator capped to five steps, the same probe ended at 24 ms lag (91 ms maximum). No test file was created. This bound prevents a stale queue; it cannot maintain full-speed physics or low browser latency when the server CPU is overloaded.
+- All eight Node tests, the production build, a native-GPU two-browser smoke run, all seven crash/contact/rejoin stress scenarios, and five consecutive race/rematch cycles passed after the change. No new test files were created.
+
 ## NOT TESTED and practical limits
 
 - Public deployment: NOT TESTED. No deployed URL was available. Render configuration, health route and same-origin networking remain intact; a Git push does not prove that a public deployment succeeded.

@@ -278,7 +278,13 @@ export async function createGame({ dev = false } = {}) {
     accumulator = 0;
   const interval = setInterval(() => {
     const mono = performance.now();
-    accumulator += Math.min(0.1, (mono - lastTick) / 1000);
+    // Do not let sustained CPU overload build an ever-older physics queue.
+    // Five fixed steps are the most this callback can execute; discard older
+    // debt so authoritative positions and timestamps stay close to wall time.
+    accumulator = Math.min(
+      5 / 60,
+      accumulator + Math.max(0, (mono - lastTick) / 1000),
+    );
     lastTick = mono;
     let steps = 0;
     while (accumulator >= 1 / 60 && steps < 5) {
