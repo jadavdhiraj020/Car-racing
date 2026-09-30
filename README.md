@@ -1,6 +1,6 @@
 # 🏎️ APEX — 3D Friend Racing Game
 
-A complete friends-only racing project: Babylon.js graphics, an authoritative Node.js/Socket.IO server, Cannon physics, private rooms, 2–6 drivers, 3 laps, results, and rematches. No database, player accounts, paid assets, or API keys.
+A complete racing project for solo testing or friends: Babylon.js graphics, an authoritative Node.js/Socket.IO server, Cannon physics, private rooms, 1–6 drivers, 3 laps, results, and rematches. No database, player accounts, paid assets, or API keys.
 
 **Status:** implemented and locally tested. Public deployment and a race between different homes are not yet verified. The repository is connected at https://github.com/jadavdhiraj020/Car-racing. Follow the deployment steps below; after deployment you do not start a server for each race.
 
@@ -111,7 +111,11 @@ node scripts/browser-check.mjs
 
 Screenshots are written to `test-artifacts/`. Chrome automation uses a temporary isolated browser profile, not your personal browser session.
 
-## Test with two players
+## Test alone or with friends
+
+To test alone, open **http://localhost:3000**, enter a nickname, click **CREATE A RACE**, then **START RACE →**. Complete three laps to see your result, then use **RUN IT BACK ↻** to race again. The same server physics, checkpoints, lap counting and results apply to solo races.
+
+To test multiplayer with two windows:
 
 1. Open **http://localhost:3000** in a browser window. Enter `Dhiraj`; click **CREATE A RACE**.
 2. Click **COPY INVITE LINK**. Open the copied link in a second window or an incognito window on the same computer.

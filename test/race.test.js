@@ -6,16 +6,25 @@ import { createGame } from "../server/index.js";
 import { point, LENGTH, nearest } from "../shared/track.js";
 
 test("circuit has left/right turns, sweepers, gentle bends and a long straight", () => {
-  let left = false, right = false, sweepers = false, gentle = false, straight = 0, longest = 0;
-  for(let s=0;s<LENGTH;s++) {
-    const a=point(s),b=point(s+1);
-    const turn=Math.atan2(Math.sin(b.yaw-a.yaw),Math.cos(b.yaw-a.yaw));
-    left ||= turn < -0.01; right ||= turn > 0.01;
+  let left = false,
+    right = false,
+    sweepers = false,
+    gentle = false,
+    straight = 0,
+    longest = 0;
+  for (let s = 0; s < LENGTH; s++) {
+    const a = point(s),
+      b = point(s + 1);
+    const turn = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw));
+    left ||= turn < -0.01;
+    right ||= turn > 0.01;
     sweepers ||= Math.abs(turn) > 0.015;
     gentle ||= Math.abs(turn) > 0.005 && Math.abs(turn) <= 0.015;
-    straight=Math.abs(turn)<0.001?straight+1:0;longest=Math.max(longest,straight);
+    straight = Math.abs(turn) < 0.001 ? straight + 1 : 0;
+    longest = Math.max(longest, straight);
   }
-  assert.ok(left && right && sweepers && gentle);assert.ok(longest>=80);
+  assert.ok(left && right && sweepers && gentle);
+  assert.ok(longest >= 80);
 });
 test("track is continuous and nearest recovers distance", () => {
   for (let s = 0; s < LENGTH; s += 0.7) {
@@ -142,7 +151,15 @@ test("real Socket.IO clients: validation, isolation, host authority, movement, r
   const created = await send(a, "enter", { name: "Alpha", create: true });
   assert.equal(created.ok, true);
   const room = game.rooms.get(created.code);
-  assert.equal((await send(a, "start")).ok, false);
+  assert.equal((await send(a, "start")).ok, true);
+  room.startAt = Date.now() - 1000;
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(room.phase, "racing");
+  room.race.cars.get(a.id).finished = 1200;
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(room.phase, "results");
+  assert.equal((await send(a, "rematch")).ok, true);
+  assert.equal(room.phase, "lobby");
   assert.equal(
     (await send(b, "enter", { name: "Bravo", code: created.code })).ok,
     true,

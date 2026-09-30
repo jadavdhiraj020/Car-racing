@@ -225,11 +225,7 @@ export async function createGame({ dev = false } = {}) {
     action("start", () => {
       const r = rooms.get(s.data.room);
       if (!r || r.host !== s.id) throw Error("Only the host can start.");
-      const activePlayers = [...r.players.keys()].filter(
-        (id) => ![...r.pending.values()].some((v) => v.id === id),
-      );
-      if (r.phase !== "lobby" || activePlayers.length < 2)
-        throw Error("You need at least 2 players.");
+      if (r.phase !== "lobby") throw Error("Race is already in progress.");
       if (r.pending.size)
         throw Error("Wait for reconnecting racers before starting.");
       r.race = new Race();

@@ -400,14 +400,14 @@ function render() {
       .join(""),
   );
   $("start").hidden = !host;
-  $("start").disabled = state.players.length < 2 || reconnecting.size > 0;
+  $("start").disabled = reconnecting.size > 0;
   $("waiting").textContent =
     `${state.players.length} / 6 drivers · ` +
     (host
       ? reconnecting.size > 0
         ? "Waiting for reconnecting drivers…"
         : state.players.length < 2
-          ? "Invite a friend to start."
+          ? "Start a solo test race or invite friends."
           : "Everyone in? Start when ready."
       : "Waiting for host to start…");
 

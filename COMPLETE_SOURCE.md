@@ -71,7 +71,7 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/README.md`
 ```
 # 🏎️ APEX — 3D Friend Racing Game
 
-A complete friends-only racing project: Babylon.js graphics, an authoritative Node.js/Socket.IO server, Cannon physics, private rooms, 2–6 drivers, 3 laps, results, and rematches. No database, player accounts, paid assets, or API keys.
+A complete racing project for solo testing or friends: Babylon.js graphics, an authoritative Node.js/Socket.IO server, Cannon physics, private rooms, 1–6 drivers, 3 laps, results, and rematches. No database, player accounts, paid assets, or API keys.
 
 **Status:** implemented and locally tested. Public deployment and a race between different homes are not yet verified. The repository is connected at https://github.com/jadavdhiraj020/Car-racing. Follow the deployment steps below; after deployment you do not start a server for each race.
 
@@ -182,7 +182,11 @@ node scripts/browser-check.mjs
 
 Screenshots are written to `test-artifacts/`. Chrome automation uses a temporary isolated browser profile, not your personal browser session.
 
-## Test with two players
+## Test alone or with friends
+
+To test alone, open **http://localhost:3000**, enter a nickname, click **CREATE A RACE**, then **START RACE →**. Complete three laps to see your result, then use **RUN IT BACK ↻** to race again. The same server physics, checkpoints, lap counting and results apply to solo races.
+
+To test multiplayer with two windows:
 
 1. Open **http://localhost:3000** in a browser window. Enter `Dhiraj`; click **CREATE A RACE**.
 2. Click **COPY INVITE LINK**. Open the copied link in a second window or an incognito window on the same computer.
@@ -663,6 +667,11 @@ For manual multiplayer verification, create/join a room in two independent brows
 - The eight existing Node tests and direct randomized six-car, 6,000-step server simulation passed; that simulation's largest residual overlap was 5.4 cm. `npm audit --omit=dev --audit-level=moderate` reported zero production-package vulnerabilities. No test files were added.
 - The final art pass added a generated sky, coastal ridges and clouds, a closer chase camera, richer lighting and car paint, and a subtle vignette. Its final two-client native-GPU browser run measured 21.3 / 23.2 ms mean frame intervals (p95 28.6 / 29.4 ms), zero failed frames and zero page errors. These measurements remain below a locked 60 FPS target on this machine.
 - After integrating all changes, the production build and native-GPU two-browser smoke check passed. The existing crash stress script was updated for the new 30-second reconnect grace; all seven scenarios then passed, including seat expiry followed by lobby rejoin. The existing five-cycle race/rematch stress script passed with zero errors. No new test files were created.
+
+## 2026-09-30 solo testing follow-up
+
+- A room host can start with one driver. The regular countdown, authoritative physics, checkpoints, three laps, results and rematch are reused; the lobby now offers a solo test race instead of disabling START.
+- The existing Socket.IO integration test now covers solo start, finish and rematch before its two-player race. All eight Node tests and the production build passed. A native-GPU Chrome solo flow passed START, the 1 / 1 position HUD, results (using a server-side finish fixture) and rematch with no page errors. The existing two-browser Chrome smoke check also passed with no page errors. No new test files were created.
 
 ## NOT TESTED and practical limits
 
@@ -2247,14 +2256,14 @@ function render() {
       .join(""),
   );
   $("start").hidden = !host;
-  $("start").disabled = state.players.length < 2 || reconnecting.size > 0;
+  $("start").disabled = reconnecting.size > 0;
   $("waiting").textContent =
     `${state.players.length} / 6 drivers · ` +
     (host
       ? reconnecting.size > 0
         ? "Waiting for reconnecting drivers…"
         : state.players.length < 2
-          ? "Invite a friend to start."
+          ? "Start a solo test race or invite friends."
           : "Everyone in? Start when ready."
       : "Waiting for host to start…");
 
@@ -9403,11 +9412,7 @@ export async function createGame({ dev = false } = {}) {
     action("start", () => {
       const r = rooms.get(s.data.room);
       if (!r || r.host !== s.id) throw Error("Only the host can start.");
-      const activePlayers = [...r.players.keys()].filter(
-        (id) => ![...r.pending.values()].some((v) => v.id === id),
-      );
-      if (r.phase !== "lobby" || activePlayers.length < 2)
-        throw Error("You need at least 2 players.");
+      if (r.phase !== "lobby") throw Error("Race is already in progress.");
       if (r.pending.size)
         throw Error("Wait for reconnecting racers before starting.");
       r.race = new Race();
@@ -10380,16 +10385,25 @@ import { createGame } from "../server/index.js";
 import { point, LENGTH, nearest } from "../shared/track.js";
 
 test("circuit has left/right turns, sweepers, gentle bends and a long straight", () => {
-  let left = false, right = false, sweepers = false, gentle = false, straight = 0, longest = 0;
-  for(let s=0;s<LENGTH;s++) {
-    const a=point(s),b=point(s+1);
-    const turn=Math.atan2(Math.sin(b.yaw-a.yaw),Math.cos(b.yaw-a.yaw));
-    left ||= turn < -0.01; right ||= turn > 0.01;
+  let left = false,
+    right = false,
+    sweepers = false,
+    gentle = false,
+    straight = 0,
+    longest = 0;
+  for (let s = 0; s < LENGTH; s++) {
+    const a = point(s),
+      b = point(s + 1);
+    const turn = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw));
+    left ||= turn < -0.01;
+    right ||= turn > 0.01;
     sweepers ||= Math.abs(turn) > 0.015;
     gentle ||= Math.abs(turn) > 0.005 && Math.abs(turn) <= 0.015;
-    straight=Math.abs(turn)<0.001?straight+1:0;longest=Math.max(longest,straight);
+    straight = Math.abs(turn) < 0.001 ? straight + 1 : 0;
+    longest = Math.max(longest, straight);
   }
-  assert.ok(left && right && sweepers && gentle);assert.ok(longest>=80);
+  assert.ok(left && right && sweepers && gentle);
+  assert.ok(longest >= 80);
 });
 test("track is continuous and nearest recovers distance", () => {
   for (let s = 0; s < LENGTH; s += 0.7) {
@@ -10516,7 +10530,15 @@ test("real Socket.IO clients: validation, isolation, host authority, movement, r
   const created = await send(a, "enter", { name: "Alpha", create: true });
   assert.equal(created.ok, true);
   const room = game.rooms.get(created.code);
-  assert.equal((await send(a, "start")).ok, false);
+  assert.equal((await send(a, "start")).ok, true);
+  room.startAt = Date.now() - 1000;
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(room.phase, "racing");
+  room.race.cars.get(a.id).finished = 1200;
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(room.phase, "results");
+  assert.equal((await send(a, "rematch")).ok, true);
+  assert.equal(room.phase, "lobby");
   assert.equal(
     (await send(b, "enter", { name: "Bravo", code: created.code })).ok,
     true,

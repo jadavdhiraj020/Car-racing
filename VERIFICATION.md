@@ -103,6 +103,11 @@ For manual multiplayer verification, create/join a room in two independent brows
 - The final art pass added a generated sky, coastal ridges and clouds, a closer chase camera, richer lighting and car paint, and a subtle vignette. Its final two-client native-GPU browser run measured 21.3 / 23.2 ms mean frame intervals (p95 28.6 / 29.4 ms), zero failed frames and zero page errors. These measurements remain below a locked 60 FPS target on this machine.
 - After integrating all changes, the production build and native-GPU two-browser smoke check passed. The existing crash stress script was updated for the new 30-second reconnect grace; all seven scenarios then passed, including seat expiry followed by lobby rejoin. The existing five-cycle race/rematch stress script passed with zero errors. No new test files were created.
 
+## 2026-09-30 solo testing follow-up
+
+- A room host can start with one driver. The regular countdown, authoritative physics, checkpoints, three laps, results and rematch are reused; the lobby now offers a solo test race instead of disabling START.
+- The existing Socket.IO integration test now covers solo start, finish and rematch before its two-player race. All eight Node tests and the production build passed. A native-GPU Chrome solo flow passed START, the 1 / 1 position HUD, results (using a server-side finish fixture) and rematch with no page errors. The existing two-browser Chrome smoke check also passed with no page errors. No new test files were created.
+
 ## NOT TESTED and practical limits
 
 - Public deployment: NOT TESTED. No deployed URL was available. Render configuration, health route and same-origin networking remain intact; a Git push does not prove that a public deployment succeeded.
