@@ -6,7 +6,7 @@ All tracked source and configuration files. Generated build artifacts and this l
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/.github/workflows/ci.yml`
 
-````
+```
 name: Check racing game
 on: [push, pull_request]
 jobs:
@@ -21,26 +21,26 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-````
+```
 
 ## .gitignore
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/.gitignore`
 
-````
+```
 node_modules/
 dist/
 .env
 *.log
 test-artifacts/
 release/
-````
+```
 
 ## LICENSE
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/LICENSE`
 
-````
+```
 MIT License
 
 Copyright (c) 2026 APEX Friends Racing contributors
@@ -62,13 +62,13 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-````
+```
 
 ## README.md
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/README.md`
 
-````
+```
 # 🏎️ APEX — 3D Friend Racing Game
 
 A complete friends-only racing project: Babylon.js graphics, an authoritative Node.js/Socket.IO server, Cannon physics, private rooms, 2–6 drivers, 3 laps, results, and rematches. No database, player accounts, paid assets, or API keys.
@@ -91,9 +91,9 @@ Cannon is a deliberate simplification: the server runs the same lightweight Java
 
 The client sends six boolean controls and an input sequence; it cannot submit position, laps, or results. The server advances physics at 60 ticks/second, accepts the next checkpoint only in the forward direction, and counts 24 gates per lap. Reset returns to the last accepted checkpoint without increasing progress. A car finishes at 72 crossings. Results appear when everyone remaining finishes, 60 seconds after the first finish, or at the 10-minute race limit. Unfinished drivers receive DNF. Finish times interpolate the crossing within a physics tick; roster order breaks exact ties.
 
-The browser uses a shared steering controller for fixed-step local prediction, acknowledges input sequences, and reconciles server corrections. Key presses and releases use reliable Socket.IO delivery; unchanged periodic input updates may be dropped under congestion. Opponents interpolate on a shared synchronized timeline with a bounded jitter buffer, limited extrapolation, and speed-limited visual catch-up after missing snapshots. Prediction yields to authoritative contacts near other cars and barriers, with a short visual handoff to avoid a visible snap. Sequenced snapshots are validated before reaching rendering, HUD or audio. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels that avoid HUD panels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
+The browser uses a shared steering controller for fixed-step local prediction, acknowledges input sequences, and reconciles server corrections. Key presses and releases use reliable Socket.IO delivery; unchanged periodic input updates may be dropped under congestion. High-rate race snapshots may also be dropped under congestion, with reliable keyframes about every 233 ms. Opponents interpolate on a shared synchronized timeline with a bounded jitter buffer, limited extrapolation, and speed-limited visual catch-up after missing snapshots. Prediction yields to authoritative contacts near other cars and barriers, with a short visual handoff to avoid a visible snap. Sequenced snapshots are validated before reaching rendering, HUD or audio. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels that avoid HUD panels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
 
-Disconnects immediately remove the driver and transfer host to the next remaining player. Empty rooms are deleted. Socket.IO reconnects transport automatically, but a disconnected driver must join the lobby again; mid-race joining/resuming is intentionally disabled. A host can rematch after results to reopen the lobby. Restarts and deploys erase all rooms.
+An interrupted connection keeps that driver's seat, car and race progress for up to 30 seconds. The same browser tab stores a temporary seat token and automatically reclaims the seat when its connection returns or the page is refreshed. Controls are released while disconnected; an active driver becomes host if needed. If the grace period expires, the driver is removed and empty rooms are deleted. New drivers still cannot join an active race. A host can rematch after results to reopen the lobby. Restarts and deploys erase all rooms and seat tokens.
 
 ## Project structure / important files
 
@@ -328,7 +328,7 @@ No public URL exists yet. Render will assign one like `https://apex-friends-raci
 | Low frame rate                                | High pixel density, weak GPU or software rendering           | Click the quality button until it reads **QUALITY LOW**; close extra 3D browser windows; enable hardware acceleration.                                                   |
 | Car falls through road                        | Modified ground/physics code                                 | Original track has a ground plane. Press R. Restore `server/race.js` ground setup and flat track; server auto-resets out-of-bounds cars.                                 |
 | Car stuck at barrier                          | Steering into wall                                           | Brake/reverse with S or press R (2-second reset cooldown).                                                                                                               |
-| Remote cars not moving                        | Race not started, connection lost, input window unfocused    | Wait for GO; focus the driving window; verify ONLINE indicator and `/health`. Disconnected players must rejoin the next lobby.                                           |
+| Remote cars not moving                        | Race not started, connection lost, input window unfocused    | Wait for GO; focus the driving window; verify ONLINE indicator and `/health`. A disconnected driver's seat can resume in the same tab for 30 seconds.                    |
 | Car stops accelerating when switching windows | Controls clear on blur, intentionally                        | Keep the driving window focused. Use another device to drive both simultaneously.                                                                                        |
 | Lap does not count                            | Gate skipped or driving backward                             | Follow the glowing next gate. Press R to return to last valid checkpoint. Every gate must be crossed forward.                                                            |
 | Deployment build failed                       | Wrong folder/Node/dependencies                               | Confirm root blank, Node 24, lockfile committed and exact build command; inspect Render Events → failed deploy → logs. Run `npm.cmd ci` and `npm.cmd run build` locally. |
@@ -350,13 +350,13 @@ See [VERIFICATION.md](VERIFICATION.md) for measured frame times, complete two-br
 3. Open your assigned HTTPS URL, create a room, share its invite link, and invite a friend on another network for the final online race check.
 
 No local server management is needed after that one-time deployment, subject to free hosting limits.
-````
+```
 
 ## THIRD_PARTY_NOTICES.md
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/THIRD_PARTY_NOTICES.md`
 
-````
+```
 # Bundled font licenses
 
 Fonts are served locally from the production build. Engine audio, car geometry and reflection textures are procedural. The ambient music in client/src/music.js is an original procedural composition included under this project's MIT license; it uses no recordings, commercial songs or third-party sample libraries.
@@ -552,31 +552,31 @@ INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
 DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
-````
+```
 
 ## VERIFICATION.md
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/VERIFICATION.md`
 
-````
+```
 # Verification record
 
 Checked 2026-09-20 through 2026-09-24 on Windows, Node.js 24.19.0 and Chrome using Intel UHD / Direct3D11. No new test files were added. The existing browser smoke check's quality list was updated for Ultra; other additional checks ran inline. Build artifacts, screenshots and local metrics are ignored under test-artifacts/.
 
 ## Audit and fixes
 
-| Priority | Reproduced problem or audit finding | Change |
-| --- | --- | --- |
-| P0 | Render frames threw ReferenceError and assignment-to-constant errors; recovery warnings hid a broken 3D view even though build/server tests passed | Repair target yaw/time bindings and mutable height; count failed frames and surface the first render error |
-| P1 | Raw oversized delta reached Cannon despite a locally clamped value; invalid transforms could contaminate contact solving | Bound the complete simulation step, reject invalid deltas, repair nonfinite car state before stepping |
-| P1 | Delayed/reordered or malformed snapshots could reach HUD, transforms and audio | Validate complete snapshots and reject stale sequence numbers; track race generation |
-| P1 | High-speed drift yaw and instantaneous lateral cancellation produced abrupt handling | Bound lateral acceleration/yaw authority and preserve damped lateral inertia in shared server/prediction handling |
-| P1 | Variable-step prediction and independently adjusted interpolation could disagree during contact | Fixed-step local prediction, one frame timeline, conservative contact fallback, bounded extrapolation and residual oriented visual separation |
-| P1 | Stale commands survived reset or were reported as active throttle; redundant bindings released held controls | Snapshot effective controls; clear reset commands; aggregate independent keyboard and pointer sources; clear them on blur, hide, disconnect and leave |
-| P1 | Audio transients, remote voices and music needed explicit ownership across state changes | Owned node/source/timer cleanup, bounded music voices, envelope ramps, remote range hysteresis, cancellation on mute/phase/hide |
-| P2 | Camera aim and lobby transitions snapped; wheels always spun forward | Damped aim/position/FOV, signed wheel rotation, bounded load-based body and suspension motion |
-| P2 | Repeated track scans, identical DOM writes and layout reads consumed frame budget | Exact spatial rejection in nearest-track search, cached HTML, batched HUD rectangles, bounded adaptive resolution |
-| P2 | Requested music/mixer and Ultra tier were missing | Original quiet procedural ambient score, four independent mixer controls, four graphics tiers |
+| Priority | Reproduced problem or audit finding                                                                                                                | Change                                                                                                                                                |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0       | Render frames threw ReferenceError and assignment-to-constant errors; recovery warnings hid a broken 3D view even though build/server tests passed | Repair target yaw/time bindings and mutable height; count failed frames and surface the first render error                                            |
+| P1       | Raw oversized delta reached Cannon despite a locally clamped value; invalid transforms could contaminate contact solving                           | Bound the complete simulation step, reject invalid deltas, repair nonfinite car state before stepping                                                 |
+| P1       | Delayed/reordered or malformed snapshots could reach HUD, transforms and audio                                                                     | Validate complete snapshots and reject stale sequence numbers; track race generation                                                                  |
+| P1       | High-speed drift yaw and instantaneous lateral cancellation produced abrupt handling                                                               | Bound lateral acceleration/yaw authority and preserve damped lateral inertia in shared server/prediction handling                                     |
+| P1       | Variable-step prediction and independently adjusted interpolation could disagree during contact                                                    | Fixed-step local prediction, one frame timeline, conservative contact fallback, bounded extrapolation and residual oriented visual separation         |
+| P1       | Stale commands survived reset or were reported as active throttle; redundant bindings released held controls                                       | Snapshot effective controls; clear reset commands; aggregate independent keyboard and pointer sources; clear them on blur, hide, disconnect and leave |
+| P1       | Audio transients, remote voices and music needed explicit ownership across state changes                                                           | Owned node/source/timer cleanup, bounded music voices, envelope ramps, remote range hysteresis, cancellation on mute/phase/hide                       |
+| P2       | Camera aim and lobby transitions snapped; wheels always spun forward                                                                               | Damped aim/position/FOV, signed wheel rotation, bounded load-based body and suspension motion                                                         |
+| P2       | Repeated track scans, identical DOM writes and layout reads consumed frame budget                                                                  | Exact spatial rejection in nearest-track search, cached HTML, batched HUD rectangles, bounded adaptive resolution                                     |
+| P2       | Requested music/mixer and Ultra tier were missing                                                                                                  | Original quiet procedural ambient score, four independent mixer controls, four graphics tiers                                                         |
 
 The existing room, race, checkpoint, results, rematch and same-origin deployment architecture is preserved. This remains a believable arcade handling model: suspension/body load is animated, not a full tire and suspension simulator. The existing flowing 22 m wide circuit is retained. The validated WebGL2 path is retained; WebGPU was not introduced.
 
@@ -599,18 +599,18 @@ The existing room, race, checkpoint, results, rematch and same-origin deployment
 
 Two native-GPU Chrome clients share this machine's GPU. Medium may adapt its internal resolution; these measurements are observations, not universal 60 FPS guarantees.
 
-| Measurement | Observation |
-| --- | --- |
-| Sustained race viewport | 1280 x 800 per client |
-| Late-race frame interval | 20.54 / 20.55 ms mean (about 49 FPS); p95 24.4 / 24.5 ms over each client's latest 360 frames |
-| CPU time inside scene.render at final sample | 2.6 / 7.8 ms; excludes asynchronous GPU work |
-| Draw calls at final sample | 67 / 100; depends on each camera's visible objects |
-| Scene objects throughout race/rematch checks | 573 meshes, 49 materials, 14 textures; no growth observed |
-| Post-GC JS heap at 3 / 36 / 68 / 102 seconds, client 1 | 23.27 / 23.98 / 24.29 / 23.69 MB |
-| Post-GC JS heap at same points, client 2 | 22.81 / 23.60 / 23.74 / 23.40 MB |
-| Audio after mute and envelope completion | 33 nodes, 9 reusable continuous sources, 0 music voices, 0 remote cars, 0 transient timers |
-| Final six-car, 900-tick simulation with deterministic random controls | Mean 1.28 ms, p95 2.22 ms per tick |
-| Measured racing snapshots over 3 seconds | 29.62 Hz, approximately 25.4 kB/s of JSON payload per receiving client for two cars; excludes transport overhead |
+| Measurement                                                           | Observation                                                                                                      |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Sustained race viewport                                               | 1280 x 800 per client                                                                                            |
+| Late-race frame interval                                              | 20.54 / 20.55 ms mean (about 49 FPS); p95 24.4 / 24.5 ms over each client's latest 360 frames                    |
+| CPU time inside scene.render at final sample                          | 2.6 / 7.8 ms; excludes asynchronous GPU work                                                                     |
+| Draw calls at final sample                                            | 67 / 100; depends on each camera's visible objects                                                               |
+| Scene objects throughout race/rematch checks                          | 573 meshes, 49 materials, 14 textures; no growth observed                                                        |
+| Post-GC JS heap at 3 / 36 / 68 / 102 seconds, client 1                | 23.27 / 23.98 / 24.29 / 23.69 MB                                                                                 |
+| Post-GC JS heap at same points, client 2                              | 22.81 / 23.60 / 23.74 / 23.40 MB                                                                                 |
+| Audio after mute and envelope completion                              | 33 nodes, 9 reusable continuous sources, 0 music voices, 0 remote cars, 0 transient timers                       |
+| Final six-car, 900-tick simulation with deterministic random controls | Mean 1.28 ms, p95 2.22 ms per tick                                                                               |
+| Measured racing snapshots over 3 seconds                              | 29.62 Hz, approximately 25.4 kB/s of JSON payload per receiving client for two cars; excludes transport overhead |
 
 Heap variation and stable object counts show no accumulating leak in these runs. They do not replace a multi-hour soak. Earlier software-rendered Chrome was much slower than native GPU rendering. Hardware acceleration is required for practical play.
 
@@ -653,6 +653,17 @@ For manual multiplayer verification, create/join a room in two independent brows
 - Made adaptive resolution react after 2 seconds instead of 4 when frame time exceeds 20 ms, and guarded camera velocity against a zero-duration frame. Resolution reached its medium-quality cap during one heavily loaded two-client run; the measured mean remained 27–32 ms, so this machine did not hold 60 FPS with two simultaneous clients.
 - Production build, eight existing Node tests, native-GPU two-client browser smoke run, crash/contact/rejoin stress run, and five race/rematch cycles passed. The unmodified software-rendered browser check timed out at rematch while Chrome was heavily loaded; the equivalent native-GPU run passed. No new test files were created.
 
+## 2026-09-30 reconnection, audio and presentation follow-up
+
+- A dropped Socket.IO connection now reserves its seat and authoritative car for 30 seconds. A temporary per-tab token resumes the same car and progress after connection recovery or refresh, including during a race. A second use of the token was rejected, host control transferred to an active racer, and a pending seat expired correctly in direct Socket.IO checks.
+- High-rate countdown and racing snapshots are now volatile with a reliable keyframe about every 233 ms, preventing a queued stream of obsolete car positions from building up during congestion. Phase transitions remain reliable. The client identifies pending drivers and prevents START while a lobby seat is reconnecting.
+- A real two-browser race refresh kept both drivers and cars, preserved the returning driver's server car object, and accepted fresh input after the socket ID changed. Refreshing the host transferred host control; results and rematch still worked. Browser tests reported no page errors. These were local loopback checks, not a simulation of public-internet packet loss.
+- Finished cars no longer trigger repeated gear/exhaust sounds from residual speed. Spatial opponent voices retire when suspended, and listener/opponent audio automation runs at up to 30 Hz. Engine firing tone now uses the correct three pulses per revolution for the procedural V6 model. Two-client sound toggles, two rematch cycles and a forced reconnect had no retained remote audio source or page error.
+- Moving name labels hide correctly when their cars leave view; camera and audio-listener vectors are reused, and suspension responds to filtered speed. A two-client native-GPU render/reconnect check reported zero failed render frames and page errors, with mean frame intervals of 20.3 / 21.5 ms and p95 of 28.6 / 31.5 ms on the tested machine. This does not establish a locked 60 FPS.
+- The eight existing Node tests and direct randomized six-car, 6,000-step server simulation passed; that simulation's largest residual overlap was 5.4 cm. `npm audit --omit=dev --audit-level=moderate` reported zero production-package vulnerabilities. No test files were added.
+- The final art pass added a generated sky, coastal ridges and clouds, a closer chase camera, richer lighting and car paint, and a subtle vignette. Its final two-client native-GPU browser run measured 21.3 / 23.2 ms mean frame intervals (p95 28.6 / 29.4 ms), zero failed frames and zero page errors. These measurements remain below a locked 60 FPS target on this machine.
+- After integrating all changes, the production build and native-GPU two-browser smoke check passed. The existing crash stress script was updated for the new 30-second reconnect grace; all seven scenarios then passed, including seat expiry followed by lobby rejoin. The existing five-cycle race/rematch stress script passed with zero errors. No new test files were created.
+
 ## NOT TESTED and practical limits
 
 - Public deployment: NOT TESTED. No deployed URL was available. Render configuration, health route and same-origin networking remain intact; a Git push does not prove that a public deployment succeeded.
@@ -660,15 +671,15 @@ For manual multiplayer verification, create/join a room in two independent brows
 - Audio is procedural motorsport-inspired synthesis, not sampled real F1 recordings. Perceived engine/music quality has not been independently rated.
 - The tested machine does not sustain locked 60 FPS with two simultaneous 3D clients. Adaptive resolution is bounded; select Low or use one client per machine for more headroom.
 - No overlap/pass-through was observed in the stated checks. Finite simulation and arbitrary networking conditions cannot establish an absolute guarantee for every possible collision.
-- A full transport disconnect removes that driver and may transfer host. Rejoining an active race remains disabled; reconnecting players join the next lobby.
+- A returning browser can reclaim its seat for 30 seconds while the same server process stays alive. A new browser without the seat token cannot join an active race; reconnect behavior across server restarts is unavailable because room state is in memory.
 - Rooms remain in memory. Server restarts/deployments clear them.
-````
+```
 
 ## client/index.html
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/index.html`
 
-````
+```
 <!doctype html>
 <html lang="en">
   <head>
@@ -816,13 +827,13 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/index.html`
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
-````
+```
 
 ## client/src/audio.js
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/src/audio.js`
 
-````
+```
 import { AmbientMusic } from "./music.js";
 // Professional Web Audio API Procedural F1 Racing Audio Synthesizer
 // Pure procedural synthesis - zero external audio assets required
@@ -883,6 +894,7 @@ export class EngineAudio {
     this.lastPop = 0;
     this.lastThrottle = false;
     this.remoteCars = new Map();
+    this.nextListenerUpdate = 0;
   }
 
   track(node) {
@@ -966,6 +978,9 @@ export class EngineAudio {
     if (value) {
       this.cancelEffects();
       this.music?.stop();
+      // A hidden tab has no useful listener updates. Retire the spatial
+      // oscillators now instead of leaving them running at stale positions.
+      for (const id of [...this.remoteCars.keys()]) this.removeRemoteCar(id);
     } else if (this.enabled) this.music?.start();
     this.applyMix();
   }
@@ -999,6 +1014,7 @@ export class EngineAudio {
     this.sources.clear();
     this.nodes.clear();
     this.remoteCars.clear();
+    this.nextListenerUpdate = 0;
     this.music = null;
     const ctx = this.ctx;
     this.ctx = null;
@@ -1025,6 +1041,7 @@ export class EngineAudio {
     if (!AC) throw new Error("Web Audio unavailable");
     const ctx = new AC();
     this.ctx = ctx;
+    this.nextListenerUpdate = 0;
 
     // Master bus with multiband limiting
     const limiter = this.track(ctx.createDynamicsCompressor());
@@ -1225,14 +1242,24 @@ export class EngineAudio {
     let gear = this.gear;
 
     const safeSpeed = Number.isFinite(speed) ? speed : 0;
-    if (safeSpeed > (gearThresholds[gear - 1] ?? Infinity) && gear < 6) {
+    if (
+      racing &&
+      !finished &&
+      safeSpeed > (gearThresholds[gear - 1] ?? Infinity) &&
+      gear < 6
+    ) {
       // Upshift: ignition cut and exhaust crackle
       gear++;
       this.gear = gear;
       this.shiftUntil = now + 65;
       this.shiftType = "up";
       this.exhaustPop(0.7);
-    } else if (gear > 1 && safeSpeed < gearThresholds[gear - 2] - 3.5) {
+    } else if (
+      racing &&
+      !finished &&
+      gear > 1 &&
+      safeSpeed < gearThresholds[gear - 2] - 3.5
+    ) {
       // Downshift: rev-match throttle blip
       gear--;
       this.gear = gear;
@@ -1241,7 +1268,11 @@ export class EngineAudio {
       this.exhaustPop(0.4);
     }
 
-    if (!racing) gear = 1;
+    if (!racing || finished) {
+      gear = 1;
+      this.shiftUntil = 0;
+      this.shiftType = "";
+    }
     this.gear = gear;
 
     // Calculate realistic F1 RPM curve
@@ -1305,9 +1336,10 @@ export class EngineAudio {
         }
       }
 
-      // F1 engine acoustics: fundamental cylinder firing frequency
-      // (V6 at 12,000 RPM fires 600 times per second)
-      const baseFreq = Math.max(38, (this.rpm / 60) * 1.5);
+      // A four-stroke V6 has three firing pulses per crank revolution.
+      // At 12,000 RPM its firing fundamental is 600 Hz; the sub voice
+      // preserves low body while the upper voices carry the racing tone.
+      const baseFreq = Math.max(38, (this.rpm / 60) * 3);
       const cut = (isShifting ? 0.15 : 1.0) * limiterCut;
 
       // Frequency modulation for organic combustion feel
@@ -1625,7 +1657,7 @@ export class EngineAudio {
     carVel = null,
     camVel = null,
   ) {
-    if (!this.ctx || !this.enabled) return;
+    if (!this.ctx || !this.enabled || this.suspended) return;
     if (
       !carPos ||
       !camPos ||
@@ -1672,13 +1704,17 @@ export class EngineAudio {
         panner.connect(this.master);
 
         osc.start(t);
-        node = { panner, osc, filter, gain };
+        node = { panner, osc, filter, gain, nextUpdate: 0 };
         this.remoteCars.set(id, node);
       } catch {
         return;
       }
     }
 
+    // AudioParams interpolate between targets. Updating at 30 Hz is enough
+    // for continuous motion and halves automation work during a full grid.
+    if (t < node.nextUpdate) return;
+    node.nextUpdate = t + 1 / 30;
     try {
       if (node.panner.positionX) {
         node.panner.positionX.setTargetAtTime(carPos.x, t, 0.04);
@@ -1711,7 +1747,7 @@ export class EngineAudio {
       );
       const targetVol = Math.min(
         0.32,
-        (safeSpeed / 45) * 0.32 * (throttle ? 1.0 : 0.6),
+        (0.045 + (safeSpeed / 45) * 0.275) * (throttle ? 1.0 : 0.72),
       );
       node.gain.gain.setTargetAtTime(targetVol, t, 0.04);
     } catch {}
@@ -1755,6 +1791,8 @@ export class EngineAudio {
     if (forwardLen < 0.001) return;
     const l = this.ctx.listener,
       t = this.ctx.currentTime;
+    if (t < this.nextListenerUpdate) return;
+    this.nextListenerUpdate = t + 1 / 30;
     try {
       if (l.forwardX) {
         const params = {
@@ -1800,13 +1838,13 @@ export class EngineAudio {
     for (const id of [...this.remoteCars.keys()]) this.removeRemoteCar(id);
   }
 }
-````
+```
 
 ## client/src/main.js
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/src/main.js`
 
-````
+```
 import "@fontsource/barlow-condensed/latin-700.css";
 import "@fontsource/dm-sans/latin-400.css";
 import "@fontsource/dm-sans/latin-600.css";
@@ -1985,6 +2023,64 @@ $("quality").onclick = () => {
 const invite = new URLSearchParams(location.search).get("room");
 if (invite) $("code").value = invite.toUpperCase().slice(0, 5);
 
+const resumeStorageKey = "apex-race-resume";
+let resumeSession = null;
+let resumeTimer = null;
+let resumeGeneration = 0;
+let resumeDeadline = 0;
+try {
+  const saved = JSON.parse(sessionStorage.getItem(resumeStorageKey));
+  if (
+    saved &&
+    /^[A-Z2-9]{5}$/.test(saved.code) &&
+    typeof saved.token === "string" &&
+    saved.token.length >= 32 &&
+    (!invite || invite.toUpperCase() === saved.code)
+  )
+    resumeSession = saved;
+} catch {}
+
+function clearResume() {
+  resumeGeneration++;
+  clearTimeout(resumeTimer);
+  resumeTimer = null;
+  resumeSession = null;
+  resumeDeadline = 0;
+  try {
+    sessionStorage.removeItem(resumeStorageKey);
+  } catch {}
+}
+
+function rememberResume(code, token) {
+  if (!/^[A-Z2-9]{5}$/.test(code) || typeof token !== "string") return;
+  resumeGeneration++;
+  clearTimeout(resumeTimer);
+  resumeTimer = null;
+  resumeSession = { code, token };
+  resumeDeadline = 0;
+  try {
+    sessionStorage.setItem(resumeStorageKey, JSON.stringify(resumeSession));
+  } catch {}
+}
+
+function tryResume() {
+  if (!resumeSession || !socket.connected || state) return;
+  if (!resumeDeadline) resumeDeadline = Date.now() + 32000;
+  const generation = ++resumeGeneration;
+  socket.timeout(5000).emit("enter", resumeSession, (error, result) => {
+    if (generation !== resumeGeneration || !resumeSession) return;
+    if (!error && result?.ok && result.resumed) {
+      rememberResume(result.code, result.token);
+      notice("Race connection restored.");
+    } else if ((error || result?.retryable) && Date.now() < resumeDeadline) {
+      resumeTimer = setTimeout(tryResume, 700);
+    } else {
+      clearResume();
+      notice("Your race seat expired. Join the next lobby with your friends.");
+    }
+  });
+}
+
 function request(event, data = {}) {
   return new Promise((resolve) => {
     if (!socket.connected) {
@@ -2000,19 +2096,31 @@ function request(event, data = {}) {
   });
 }
 
-$("create").onclick = () =>
-  request("enter", { name: $("nickname").value, create: true });
-$("join").onclick = () =>
-  request("enter", {
+$("create").onclick = async () => {
+  clearResume();
+  const result = await request("enter", {
+    name: $("nickname").value,
+    create: true,
+    resume: true,
+  });
+  if (result?.token) rememberResume(result.code, result.token);
+};
+$("join").onclick = async () => {
+  clearResume();
+  const result = await request("enter", {
     name: $("nickname").value,
     code: $("code").value.trim().toUpperCase(),
+    resume: true,
   });
+  if (result?.token) rememberResume(result.code, result.token);
+};
 $("start").onclick = () => request("start");
 $("rematch").onclick = () => request("rematch");
 document.querySelectorAll(".leave").forEach(
   (b) =>
     (b.onclick = async () => {
       if (await request("leave")) {
+        clearResume();
         state = null;
         clearControls();
         engineAudio.setPhase("home");
@@ -2046,6 +2154,7 @@ socket.on("connect", () => {
   syncClock();
   setTimeout(syncClock, 350);
   setTimeout(syncClock, 1200);
+  if (resumeSession) tryResume();
 });
 
 socket.on("disconnect", () => {
@@ -2057,7 +2166,9 @@ socket.on("disconnect", () => {
   render();
   view?.update({ cars: [], players: [], phase: "lobby" }, socket.id);
   notice(
-    "Disconnected. When connected, rejoin the lobby with your code. An active race cannot be rejoined.",
+    resumeSession
+      ? "Connection lost. Reconnecting to your race…"
+      : "Disconnected. When connected, rejoin the lobby with your code.",
   );
 });
 
@@ -2124,24 +2235,27 @@ function render() {
   if (!state) return;
 
   const host = state.host === socket.id;
+  const reconnecting = new Set(state.reconnecting || []);
   $("roomCode").textContent = state.code;
   setHtml(
     "players",
     state.players
       .map(
         (p) =>
-          `<div class="player"><i class="swatch" style="background:${p.color}"></i>${esc(p.name)}<span class="badge">${p.id === state.host ? "HOST" : "DRIVER"}</span></div>`,
+          `<div class="player"><i class="swatch" style="background:${p.color}"></i>${esc(p.name)}<span class="badge">${reconnecting.has(p.id) ? "RECONNECTING" : p.id === state.host ? "HOST" : "DRIVER"}</span></div>`,
       )
       .join(""),
   );
   $("start").hidden = !host;
-  $("start").disabled = state.players.length < 2;
+  $("start").disabled = state.players.length < 2 || reconnecting.size > 0;
   $("waiting").textContent =
     `${state.players.length} / 6 drivers · ` +
     (host
-      ? state.players.length < 2
-        ? "Invite a friend to start."
-        : "Everyone in? Start when ready."
+      ? reconnecting.size > 0
+        ? "Waiting for reconnecting drivers…"
+        : state.players.length < 2
+          ? "Invite a friend to start."
+          : "Everyone in? Start when ready."
       : "Waiting for host to start…");
 
   const rows = ordered(),
@@ -2525,13 +2639,13 @@ function frame() {
   }
 }
 frame();
-````
+```
 
 ## client/src/music.js
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/src/music.js`
 
-````
+```
 // Original 64 BPM ambient score. No samples, recordings or commercial melodies.
 export class AmbientMusic {
   constructor(ctx, output, track = (n) => n) {
@@ -2641,13 +2755,13 @@ export class AmbientMusic {
     this.stop();
   }
 }
-````
+```
 
 ## client/src/scene.js
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/src/scene.js`
 
-````
+```
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import "@babylonjs/core/Meshes/thinInstanceMesh";
 import { predict } from "../../shared/driving.js";
@@ -2683,14 +2797,49 @@ export function createScene(canvas, audioSystem = null) {
   scene.fogDensity = 0.0012;
   scene.fogColor = new Color3(0.58, 0.77, 0.74);
 
+  // A single unlit sky draw replaces the flat clear color with a soft,
+  // painterly horizon. The texture is generated locally and needs no download.
+  const skyTexture = new DynamicTexture(
+    "coastal sky gradient",
+    { width: 16, height: 512 },
+    scene,
+    false,
+  );
+  const skyContext = skyTexture.getContext();
+  const skyGradient = skyContext.createLinearGradient(0, 0, 0, 512);
+  skyGradient.addColorStop(0, "#286b96");
+  skyGradient.addColorStop(0.4, "#6cb7ce");
+  skyGradient.addColorStop(0.52, "#b6d9d3");
+  skyGradient.addColorStop(0.6, "#e1dabc");
+  skyGradient.addColorStop(0.8, "#94b9ae");
+  skyGradient.addColorStop(1, "#558c82");
+  skyContext.fillStyle = skyGradient;
+  skyContext.fillRect(0, 0, 16, 512);
+  skyTexture.update();
+  const skyMaterial = new StandardMaterial("coastal sky", scene);
+  skyMaterial.diffuseColor = Color3.Black();
+  skyMaterial.emissiveTexture = skyTexture;
+  skyMaterial.emissiveColor = Color3.Black();
+  skyMaterial.disableLighting = true;
+  skyMaterial.fogEnabled = false;
+  skyMaterial.backFaceCulling = false;
+  const skyDome = MeshBuilder.CreateSphere(
+    "sky dome",
+    { diameter: 2400, segments: 16, sideOrientation: Mesh.BACKSIDE },
+    scene,
+  );
+  skyDome.material = skyMaterial;
+  skyDome.infiniteDistance = true;
+  skyDome.isPickable = false;
+
   // Balanced hemispheric and directional lighting
   const skyLight = new HemisphericLight("sky", new Vector3(0, 1, 0), scene);
-  skyLight.intensity = 0.75;
+  skyLight.intensity = 0.63;
   skyLight.groundColor = new Color3(0.35, 0.45, 0.38);
 
   const sun = new DirectionalLight("sun", new Vector3(-0.6, -1.2, 0.5), scene);
   sun.position = new Vector3(120, 200, -100);
-  sun.intensity = 0.95;
+  sun.intensity = 1.08;
 
   let shadowGen = null;
   const glRenderer = engine.getGlInfo()?.renderer || "";
@@ -2797,6 +2946,69 @@ export function createScene(canvas, audioSystem = null) {
 
   // Surrounding turquoise lagoon
   box("ocean", 1600, 0.1, 1600, -20, -0.75, 5, water);
+
+  // Two distant low-poly ridge layers give the coast depth without terrain
+  // textures, draw-heavy props, or moving geometry.
+  for (const [layer, radius, ridgeColor] of [
+    [0, 550, "#5c827f"],
+    [1, 675, "#739994"],
+  ]) {
+    const foot = [],
+      crest = [];
+    for (let i = 0; i <= 96; i++) {
+      const angle = (i * Math.PI * 2) / 96;
+      const x = Math.cos(angle) * radius - 20;
+      const z = Math.sin(angle) * radius + 5;
+      const ridge =
+        16 +
+        Math.max(0, Math.sin(angle * 5 + layer) * 13) +
+        Math.max(0, Math.sin(angle * 11 - layer * 2) * 8);
+      foot.push(new Vector3(x, -14, z));
+      crest.push(new Vector3(x, ridge + layer * 9, z));
+    }
+    const silhouette = MeshBuilder.CreateRibbon(
+      "distant coastal ridge " + layer,
+      { pathArray: [foot, crest], sideOrientation: Mesh.DOUBLESIDE },
+      scene,
+    );
+    silhouette.material = material("ridge " + layer, ridgeColor, 0);
+    silhouette.isPickable = false;
+    silhouette.freezeWorldMatrix();
+  }
+
+  // Broad faceted cloud banks read as one distant layer after static batching.
+  const cloudMaterial = material("sunlit clouds", "#dce9de", 0);
+  cloudMaterial.emissiveColor = new Color3(0.1, 0.12, 0.1);
+  const cloudMeshes = [];
+  for (let i = 0; i < 11; i++) {
+    const angle = (i * Math.PI * 2) / 11 + 0.3;
+    const radius = 390 + (i % 3) * 58;
+    const baseX = Math.cos(angle) * radius - 20;
+    const baseZ = Math.sin(angle) * radius + 5;
+    const height = 55 + (i % 4) * 12;
+    for (let lobe = 0; lobe < 4; lobe++) {
+      const cloud = MeshBuilder.CreateSphere(
+        "cloud bank",
+        { diameter: 1, segments: 5 },
+        scene,
+      );
+      cloud.position.set(
+        baseX + (lobe - 1.5) * 7,
+        height + (lobe % 2) * 2.5,
+        baseZ + (lobe - 1.5) * 3,
+      );
+      cloud.scaling.set(17 + (lobe % 2) * 5, 4 + lobe, 8);
+      cloud.material = cloudMaterial;
+      cloud.isPickable = false;
+      cloudMeshes.push(cloud);
+    }
+  }
+  const cloudBanks = Mesh.MergeMeshes(cloudMeshes, true, true);
+  if (cloudBanks) {
+    cloudBanks.material = cloudMaterial;
+    cloudBanks.isPickable = false;
+    cloudBanks.freezeWorldMatrix();
+  }
 
   // Smooth wide road ribbon (22m wide)
   const edges = [-11, 11].map((offset) =>
@@ -3292,7 +3504,9 @@ export function createScene(canvas, audioSystem = null) {
     chassis.parent = root;
     chassis.position.y = -0.32;
 
-    const paint = finish(player.id, player.color, 0.42, 0.22);
+    const paint = finish(player.id, player.color, 0.32, 0.26);
+    paint.environmentIntensity = 0.4;
+    paint.clearCoat.intensity = 0.72;
     const helmetPaint = finish("helmet_" + player.id, player.color, 0.55, 0.22);
 
     // Soft contact shadow disc grounded directly beneath car
@@ -4011,6 +4225,10 @@ export function createScene(canvas, audioSystem = null) {
   const scratchAnchor = new Vector3();
   const identityMatrix = Matrix.Identity();
   const lookSpring = camera.getTarget().clone();
+  const cameraDesired = new Vector3();
+  const cameraLook = new Vector3();
+  const cameraOrbit = new Vector3();
+  const listenerForward = new Vector3();
   const frameTimes = new Float64Array(360);
   let frameCount = 0,
     failedFrames = 0,
@@ -4390,15 +4608,17 @@ export function createScene(canvas, audioSystem = null) {
         }
 
         c.lastImpact = t.impact || 0;
-        // Dynamic suspension pitch (squat on gas, dive on brake) and roll into turns
+        // Network speed changes at snapshot cadence. Filter it before deriving
+        // acceleration so the suspension does not pulse once per packet.
+        const nextSpeed = Number.isFinite(t.speed) ? t.speed : 0;
+        const previousSpeed = c.visualSpeed ?? nextSpeed;
+        c.visualSpeed =
+          previousSpeed +
+          (nextSpeed - previousSpeed) * (1 - Math.exp(-14 * dt));
         const acceleration = Math.max(
           -40,
-          Math.min(
-            30,
-            (t.speed - (c.lastSpeed ?? t.speed)) / Math.max(0.016, dt),
-          ),
+          Math.min(30, (c.visualSpeed - previousSpeed) / Math.max(0.001, dt)),
         );
-        c.lastSpeed = t.speed;
         c.load =
           (c.load || 0) +
           (acceleration - (c.load || 0)) * (1 - Math.exp(-7 * dt));
@@ -4494,15 +4714,15 @@ export function createScene(canvas, audioSystem = null) {
             : 0;
 
         // Smooth chase camera distance and height inspired by the solid 1fc22f6 feel
-        const camDist = 13.5 + Math.min(2.5, speed * 0.04);
-        const camHeight = 5.2 + Math.min(0.8, speed * 0.02);
+        const camDist = 8.9 + Math.min(2.4, speed * 0.045);
+        const camHeight = 3.5 + Math.min(0.9, speed * 0.018);
 
         const px = Number.isFinite(p.x) ? p.x : 120;
         const py = Number.isFinite(p.y) ? p.y : 0.55;
         const pz = Number.isFinite(p.z) ? p.z : 0;
         const safeYaw = Number.isFinite(yaw) ? yaw : 0;
 
-        const desired = new Vector3(
+        cameraDesired.set(
           px - Math.sin(safeYaw) * camDist,
           py + camHeight,
           pz - Math.cos(safeYaw) * camDist,
@@ -4511,10 +4731,11 @@ export function createScene(canvas, audioSystem = null) {
         const prevCamX = camera.position.x;
         const prevCamZ = camera.position.z;
 
-        camera.position = Vector3.Lerp(
+        Vector3.LerpToRef(
           camera.position,
-          desired,
+          cameraDesired,
           1 - Math.exp(-8 * dt),
+          camera.position,
         );
 
         // Validate camera.position sanity
@@ -4523,23 +4744,23 @@ export function createScene(canvas, audioSystem = null) {
           !Number.isFinite(camera.position.y) ||
           !Number.isFinite(camera.position.z)
         ) {
-          camera.position.copyFrom(desired);
+          camera.position.copyFrom(cameraDesired);
         }
 
         cameraVel.x = dt > 0 ? (camera.position.x - prevCamX) / dt : 0;
         cameraVel.z = dt > 0 ? (camera.position.z - prevCamZ) / dt : 0;
 
         // Look-ahead target anticipates corners
-        const lookDist = 7.5 + Math.min(5.0, speed * 0.1);
-        const lookTarget = new Vector3(
+        const lookDist = 8 + Math.min(5.0, speed * 0.1);
+        cameraLook.set(
           px + Math.sin(safeYaw) * lookDist,
           py + 1.25,
           pz + Math.cos(safeYaw) * lookDist,
         );
-        if (Vector3.DistanceSquared(camera.position, lookTarget) > 0.01) {
+        if (Vector3.DistanceSquared(camera.position, cameraLook) > 0.01) {
           Vector3.LerpToRef(
             lookSpring,
-            lookTarget,
+            cameraLook,
             1 - Math.exp(-10 * dt),
             lookSpring,
           );
@@ -4557,15 +4778,17 @@ export function createScene(canvas, audioSystem = null) {
         // Cinematic orbit in lobby / results
         const t = now * 0.00015;
         camera.fov += (0.82 - camera.fov) * (1 - Math.exp(-4 * dt));
+        cameraOrbit.set(120 + Math.sin(t) * 75, 55, Math.cos(t) * 75);
         Vector3.LerpToRef(
           camera.position,
-          new Vector3(120 + Math.sin(t) * 75, 55, Math.cos(t) * 75),
+          cameraOrbit,
           1 - Math.exp(-2 * dt),
           camera.position,
         );
+        cameraLook.set(120, 2, 0);
         Vector3.LerpToRef(
           lookSpring,
-          new Vector3(120, 2, 0),
+          cameraLook,
           1 - Math.exp(-3 * dt),
           lookSpring,
         );
@@ -4574,11 +4797,13 @@ export function createScene(canvas, audioSystem = null) {
       }
 
       try {
-        const fwd = camera.getTarget().subtract(camera.position);
-        const fwdLen = fwd.length();
+        listenerForward
+          .copyFrom(camera.getTarget())
+          .subtractInPlace(camera.position);
+        const fwdLen = listenerForward.length();
         if (fwdLen > 0.001) {
-          fwd.scaleInPlace(1 / fwdLen);
-          audioSystem?.listener(camera.position, fwd);
+          listenerForward.scaleInPlace(1 / fwdLen);
+          audioSystem?.listener(camera.position, listenerForward);
         }
       } catch {}
       const renderStart = performance.now(),
@@ -4743,13 +4968,13 @@ export function createScene(canvas, audioSystem = null) {
     scene,
   };
 }
-````
+```
 
 ## client/src/style.css
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/src/style.css`
 
-````
+```
 :root {
   font-family: "DM Sans", sans-serif;
   color: #f2f4e9;
@@ -4825,6 +5050,18 @@ body:before {
 }
 body.racing:before {
   background: none;
+}
+body.racing:after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at 50% 55%,
+    transparent 47%,
+    rgba(8, 25, 30, 0.15) 100%
+  );
 }
 header {
   position: fixed;
@@ -5308,7 +5545,6 @@ footer,
   padding: 6px 12px;
   border-radius: 6px;
   background: rgba(11, 21, 33, 0.9);
-  backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-left: 3.5px solid var(--driver-color, #d6fc71);
   color: #fff;
@@ -5320,6 +5556,9 @@ footer,
   white-space: nowrap;
   will-change: transform, opacity;
   transform-origin: center bottom;
+}
+.driver-label[hidden] {
+  display: none;
 }
 .driver-label:after {
   content: "";
@@ -5627,13 +5866,13 @@ footer,
     top: 90px;
   }
 }
-````
+```
 
 ## package-lock.json
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/package-lock.json`
 
-````
+```
 {
   "name": "apex-friends-racing",
   "version": "1.0.0",
@@ -8060,13 +8299,13 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/package-lock.json`
     }
   }
 }
-````
+```
 
 ## package.json
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/package.json`
 
-````
+```
 {
   "name": "apex-friends-racing",
   "version": "1.0.0",
@@ -8099,13 +8338,13 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/package.json`
     "vite": "^7.1.0"
   }
 }
-````
+```
 
 ## render.yaml
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/render.yaml`
 
-````
+```
 services:
   - type: web
     name: apex-friends-racing
@@ -8119,13 +8358,13 @@ services:
         value: production
       - key: NODE_VERSION
         value: 24.19.0
-````
+```
 
 ## scripts/browser-check.mjs
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/scripts/browser-check.mjs`
 
-````
+```
 import { chromium } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import assert from "node:assert/strict";
@@ -8253,13 +8492,13 @@ try {
   await browser.close();
   await game.close();
 }
-````
+```
 
 ## scripts/chrome_check.mjs
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/scripts/chrome_check.mjs`
 
-````
+```
 import { chromium } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import assert from "node:assert/strict";
@@ -8442,13 +8681,13 @@ try {
 } finally {
   await browser.close();
 }
-````
+```
 
 ## scripts/crash-stress-test.mjs
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/scripts/crash-stress-test.mjs`
 
-````
+```
 import { chromium } from "@playwright/test";
 import assert from "node:assert/strict";
 import { createGame } from "../server/index.js";
@@ -8457,7 +8696,9 @@ const game = await createGame();
 await new Promise((resolve) => game.http.listen(0, "127.0.0.1", resolve));
 const base = `http://127.0.0.1:${game.http.address().port}`;
 
-console.log(`Starting APEX Critical Crash & Stability Stress Test on ${base}...`);
+console.log(
+  `Starting APEX Critical Crash & Stability Stress Test on ${base}...`,
+);
 
 const browser = await chromium.launch({
   channel: "chrome",
@@ -8483,7 +8724,10 @@ const p1 = await context1.newPage();
 const p2 = await context2.newPage();
 const errors = [];
 
-for (const [name, p] of [["P1", p1], ["P2", p2]]) {
+for (const [name, p] of [
+  ["P1", p1],
+  ["P2", p2],
+]) {
   p.on("pageerror", (e) => {
     console.error(`[${name} PageError]`, e.message);
     errors.push(`${name} PageError: ${e.message}`);
@@ -8515,7 +8759,10 @@ try {
   await p2.locator("#lobby").waitFor({ state: "visible" });
 
   await p1.bringToFront();
-  await p1.locator("#players .player").filter({ hasText: "RacerBeta" }).waitFor();
+  await p1
+    .locator("#players .player")
+    .filter({ hasText: "RacerBeta" })
+    .waitFor();
 
   console.log("Both racers connected to lobby. Starting Race 1...");
 
@@ -8525,8 +8772,14 @@ try {
   await p1.locator("#start").click();
 
   await Promise.all([
-    p1.locator("#countdown").filter({ hasText: /^[123]$/ }).waitFor(),
-    p2.locator("#countdown").filter({ hasText: /^[123]$/ }).waitFor(),
+    p1
+      .locator("#countdown")
+      .filter({ hasText: /^[123]$/ })
+      .waitFor(),
+    p2
+      .locator("#countdown")
+      .filter({ hasText: /^[123]$/ })
+      .waitFor(),
   ]);
 
   await p1.waitForFunction(() => window.__getState()?.phase === "racing");
@@ -8545,16 +8798,26 @@ try {
   await p1.waitForTimeout(3500);
 
   const speed1 = Number(await p1.locator("#speed").textContent());
-  assert.ok(speed1 > 120, `Driver 1 should reach high speed, got ${speed1} km/h`);
+  assert.ok(
+    speed1 > 120,
+    `Driver 1 should reach high speed, got ${speed1} km/h`,
+  );
   assert.ok(Number.isFinite(speed1), "Speed must be finite (not NaN)");
 
   // Check UI state on p1
-  const rpm1 = await p1.evaluate(() => document.getElementById("rpm")?.style.getPropertyValue("--rpm"));
-  assert.ok(Number.isFinite(parseFloat(rpm1)), `RPM CSS variable must be finite, got ${rpm1}`);
+  const rpm1 = await p1.evaluate(() =>
+    document.getElementById("rpm")?.style.getPropertyValue("--rpm"),
+  );
+  assert.ok(
+    Number.isFinite(parseFloat(rpm1)),
+    `RPM CSS variable must be finite, got ${rpm1}`,
+  );
 
   console.log(`Max speed reached: ${speed1} km/h, RPM var: ${rpm1}.`);
 
-  console.log("TEST 2: Intentional High-Speed Wall Crashes (steering hard into barrier)...");
+  console.log(
+    "TEST 2: Intentional High-Speed Wall Crashes (steering hard into barrier)...",
+  );
   // Hard turn right into barrier at high speed
   await p1.bringToFront();
   await p1.keyboard.down("d");
@@ -8574,7 +8837,11 @@ try {
   const room = game.rooms.get(code);
   assert.ok(room, "Room must exist");
   for (const car of room.race.cars.values()) {
-    assert.equal(car.b.position.y, 0.55, "Car must stay strictly grounded at y=0.55");
+    assert.equal(
+      car.b.position.y,
+      0.55,
+      "Car must stay strictly grounded at y=0.55",
+    );
     assert.equal(car.b.velocity.y, 0, "Vertical velocity must stay at 0");
     assert.ok(Number.isFinite(car.b.position.x), "Car x must be finite");
     assert.ok(Number.isFinite(car.b.position.z), "Car z must be finite");
@@ -8584,7 +8851,9 @@ try {
     const speed = Math.hypot(car.b.velocity.x, car.b.velocity.z);
     assert.ok(speed <= 52, `Car speed must be clamped <= 52 m/s, got ${speed}`);
   }
-  console.log("PASS: Wall crashes contained car safely on track with finite physics.");
+  console.log(
+    "PASS: Wall crashes contained car safely on track with finite physics.",
+  );
 
   console.log("TEST 3: Intentional Car-to-Car Collisions...");
   // Ram Driver 1 into Driver 2
@@ -8602,10 +8871,21 @@ try {
 
   assert.ok(Number.isFinite(carA.b.velocity.z), "CarA vz must be finite");
   assert.ok(Number.isFinite(carB.b.velocity.z), "CarB vz must be finite");
-  assert.ok(Math.hypot(carA.b.velocity.x, carA.b.velocity.z) <= 52, "CarA speed <= 52");
-  assert.ok(Math.hypot(carB.b.velocity.x, carB.b.velocity.z) <= 52, "CarB speed <= 52");
-  assert.ok(carA.b.position.y === 0.55 && carB.b.position.y === 0.55, "Cars remain grounded");
-  console.log("PASS: Direct head-on car collision resolved safely with zero explosion.");
+  assert.ok(
+    Math.hypot(carA.b.velocity.x, carA.b.velocity.z) <= 52,
+    "CarA speed <= 52",
+  );
+  assert.ok(
+    Math.hypot(carB.b.velocity.x, carB.b.velocity.z) <= 52,
+    "CarB speed <= 52",
+  );
+  assert.ok(
+    carA.b.position.y === 0.55 && carB.b.position.y === 0.55,
+    "Cars remain grounded",
+  );
+  console.log(
+    "PASS: Direct head-on car collision resolved safely with zero explosion.",
+  );
 
   console.log("TEST 4: Drifting Through Sweeping Turns...");
   await p1.bringToFront();
@@ -8668,13 +8948,22 @@ try {
   console.log("TEST 7: Disconnect and Rejoin...");
   await p2.close();
   await p1.bringToFront();
-  await p1.waitForFunction(() => window.__getState()?.players.length === 1);
-  console.log("Player 2 disconnected; room updated to 1 player.");
+  await p1.waitForFunction(
+    () => window.__getState()?.reconnecting?.length === 1,
+  );
+  console.log("Player 2 disconnected; seat reserved for reconnection.");
+  await p1.waitForFunction(
+    () => window.__getState()?.players.length === 1,
+    undefined,
+    { timeout: 45000 },
+  );
+  console.log("Reconnect grace expired; room updated to 1 player.");
 
   const p2New = await context2.newPage();
   p2New.on("pageerror", (e) => errors.push(`P2New PageError: ${e.message}`));
   p2New.on("console", (msg) => {
-    if (msg.type() === "error") errors.push(`P2New ConsoleError: ${msg.text()}`);
+    if (msg.type() === "error")
+      errors.push(`P2New ConsoleError: ${msg.text()}`);
   });
 
   await p2New.goto(`${base}/?room=${code}`);
@@ -8685,7 +8974,10 @@ try {
   await p2New.locator("#lobby").waitFor({ state: "visible" });
 
   await p1.bringToFront();
-  await p1.locator("#players .player").filter({ hasText: "RacerBetaRejoined" }).waitFor();
+  await p1
+    .locator("#players .player")
+    .filter({ hasText: "RacerBetaRejoined" })
+    .waitFor();
   console.log("Player 2 successfully rejoined the lobby!");
 
   assert.deepEqual(errors, [], `Expected 0 errors, got: ${errors.join("; ")}`);
@@ -8696,13 +8988,13 @@ try {
   await browser.close();
   await game.close();
 }
-````
+```
 
 ## scripts/stress-test.mjs
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/scripts/stress-test.mjs`
 
-````
+```
 import { chromium } from "@playwright/test";
 import assert from "node:assert/strict";
 import { createGame } from "../server/index.js";
@@ -8877,21 +9169,22 @@ try {
   await browser.close();
   await game.close();
 }
-````
+```
 
 ## server/index.js
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/server/index.js`
 
-````
+```
 import express from "express";
 import { createServer } from "node:http";
-import { randomInt } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
 import { Race } from "./race.js";
 import { TRACK } from "../shared/track.js";
 export async function createGame({ dev = false } = {}) {
+  const RECONNECT_GRACE_MS = 30000;
   const app = express(),
     http = createServer(app),
     io = new Server(http, { maxHttpBufferSize: 2048 }),
@@ -8923,36 +9216,65 @@ export async function createGame({ dev = false } = {}) {
     startAt: r.startAt,
     serverNow: Date.now(),
     players: [...r.players.values()],
+    reconnecting: [...r.pending.values()].map((pending) => pending.id),
     cars: r.race.snapshot(),
     endAt: r.endAt,
   });
-  function broadcast(r) {
-    io.to(r.code).emit("state", state(r));
+  function broadcast(r, volatile = false) {
+    const packet = state(r);
+    if (volatile) io.volatile.to(r.code).emit("state", packet);
+    else io.to(r.code).emit("state", packet);
   }
-  function leave(s) {
-    const r = rooms.get(s.data.room);
-    if (!r) return;
-    const p = r.players.get(s.id);
-    r.players.delete(s.id);
-    r.race.remove(s.id);
-    s.leave(r.code);
-    s.data.room = null;
+  function removePlayer(r, id) {
+    const p = r.players.get(id);
+    if (!p) return;
+    r.players.delete(id);
+    r.race.remove(id);
+    r.tokens.delete(id);
+    for (const [token, pending] of r.pending)
+      if (pending.id === id) r.pending.delete(token);
     if (!r.players.size) {
       rooms.delete(r.code);
       return;
     }
-    if (r.host === s.id) r.host = r.players.keys().next().value;
+    if (r.host === id) r.host = r.players.keys().next().value;
     if (r.phase === "racing") {
       const remainingCars = [...r.race.cars.values()];
-      if (
-        remainingCars.length > 0 &&
-        remainingCars.every((c) => c.finished !== null)
-      ) {
-        r.phase = "results";
-      }
+      if (remainingCars.every((c) => c.finished !== null)) r.phase = "results";
     }
-    io.to(r.code).emit("notice", `${p?.name || "Player"} disconnected`);
+    io.to(r.code).emit("notice", `${p.name} disconnected`);
     broadcast(r);
+  }
+  function leave(s, disconnected = false) {
+    const r = rooms.get(s.data.room);
+    if (!r) return;
+    const p = r.players.get(s.id);
+    s.leave(r.code);
+    s.data.room = null;
+    const token = r.tokens.get(s.id);
+    if (disconnected && token && p) {
+      const c = r.race.cars.get(s.id);
+      if (c) {
+        c.input = {};
+        c.inputAt = 0;
+        c.inputSeq = 0;
+      }
+      r.pending.set(token, {
+        id: s.id,
+        until: Date.now() + RECONNECT_GRACE_MS,
+      });
+      if (r.host === s.id) {
+        const replacement = [...r.players.keys()].find(
+          (id) =>
+            id !== s.id && ![...r.pending.values()].some((v) => v.id === id),
+        );
+        if (replacement) r.host = replacement;
+      }
+      io.to(r.code).emit("notice", `${p.name} is reconnecting`);
+      broadcast(r);
+      return;
+    }
+    removePlayer(r, s.id);
   }
   io.on("connection", (s) => {
     let requests = 0,
@@ -8972,15 +9294,66 @@ export async function createGame({ dev = false } = {}) {
           if (typeof ack === "function") ack({ ok: true, ...result });
         } catch (e) {
           if (typeof ack === "function")
-            ack({ ok: false, error: e.message || "Request failed" });
+            ack({
+              ok: false,
+              error: e.message || "Request failed",
+              retryable: e.retryable === true,
+            });
         }
       });
     action("enter", (data) => {
       if (!data || typeof data !== "object") throw Error("Enter a nickname.");
+      if (s.data.room) throw Error("Leave your current room first.");
+      if (data.token !== undefined) {
+        if (
+          typeof data.code !== "string" ||
+          !/^[A-Z2-9]{5}$/.test(data.code) ||
+          typeof data.token !== "string" ||
+          !/^[A-Za-z0-9_-]{43}$/.test(data.token)
+        )
+          throw Error("Invalid reconnect details.");
+        const r = rooms.get(data.code);
+        if (!r) throw Error("Room not found. Ask your friend for a new code.");
+        const pending = r?.pending.get(data.token);
+        if (!pending && [...r.tokens.values()].includes(data.token)) {
+          const error = Error(
+            "Previous connection is still closing. Retrying...",
+          );
+          error.retryable = true;
+          throw error;
+        }
+        if (!pending || pending.until <= Date.now())
+          throw Error("Reconnect window expired. Join the next lobby.");
+        const oldId = pending.id;
+        const p = r.players.get(oldId),
+          c = r.race.cars.get(oldId);
+        if (!p || !c) throw Error("Racer is no longer available.");
+        r.pending.delete(data.token);
+        r.players.delete(oldId);
+        r.players.set(s.id, { ...p, id: s.id });
+        r.race.cars.delete(oldId);
+        c.id = s.id;
+        c.input = {};
+        c.inputAt = 0;
+        c.inputSeq = 0;
+        c.ack = 0;
+        r.race.cars.set(s.id, c);
+        r.tokens.delete(oldId);
+        r.tokens.set(s.id, data.token);
+        if (r.host === oldId) r.host = s.id;
+        else if (
+          [...r.pending.values()].some((pending) => pending.id === r.host)
+        )
+          r.host = s.id;
+        s.data.room = r.code;
+        s.join(r.code);
+        io.to(r.code).emit("notice", `${p.name} reconnected`);
+        broadcast(r);
+        return { code: r.code, token: data.token, resumed: true };
+      }
       const name = typeof data.name === "string" ? data.name.trim() : "";
       if (name.length < 1 || name.length > 18 || /[\x00-\x1f]/.test(name))
         throw Error("Use a nickname of 1–18 characters.");
-      if (s.data.room) throw Error("Leave your current room first.");
       let r;
       if (data.create === true) {
         if (rooms.size >= 100) throw Error("Server is full. Try later.");
@@ -8988,7 +9361,7 @@ export async function createGame({ dev = false } = {}) {
         do {
           code = Array.from(
             { length: 5 },
-            () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[randomInt(31)],
+            () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[randomInt(32)],
           ).join("");
         } while (rooms.has(code));
         r = {
@@ -8996,6 +9369,8 @@ export async function createGame({ dev = false } = {}) {
           host: s.id,
           phase: "lobby",
           players: new Map(),
+          tokens: new Map(),
+          pending: new Map(),
           race: new Race(),
           startAt: 0,
           endAt: 0,
@@ -9016,17 +9391,25 @@ export async function createGame({ dev = false } = {}) {
         ) || colors[r.players.size % colors.length];
       r.players.set(s.id, { id: s.id, name, color });
       r.race.add(s.id, r.players.size - 1);
+      const token =
+        data.resume === true ? randomBytes(32).toString("base64url") : null;
+      if (token) r.tokens.set(s.id, token);
       s.data.room = r.code;
       s.join(r.code);
       io.to(r.code).emit("notice", `${name} joined the race`);
       broadcast(r);
-      return { code: r.code };
+      return { code: r.code, ...(token ? { token } : {}) };
     });
     action("start", () => {
       const r = rooms.get(s.data.room);
       if (!r || r.host !== s.id) throw Error("Only the host can start.");
-      if (r.phase !== "lobby" || r.players.size < 2)
+      const activePlayers = [...r.players.keys()].filter(
+        (id) => ![...r.pending.values()].some((v) => v.id === id),
+      );
+      if (r.phase !== "lobby" || activePlayers.length < 2)
         throw Error("You need at least 2 players.");
+      if (r.pending.size)
+        throw Error("Wait for reconnecting racers before starting.");
       r.race = new Race();
       r.raceId = (r.raceId || 0) + 1;
       [...r.players.keys()].forEach((id, i) => r.race.add(id, i));
@@ -9070,7 +9453,7 @@ export async function createGame({ dev = false } = {}) {
       );
       c.inputAt = Date.now();
     });
-    s.on("disconnect", () => leave(s));
+    s.on("disconnect", () => leave(s, true));
   });
   let ticks = 0,
     lastTick = performance.now(),
@@ -9085,7 +9468,14 @@ export async function createGame({ dev = false } = {}) {
       steps++;
       const now = Date.now() - accumulator * 1000;
       for (const r of rooms.values()) {
-        if (r.phase === "countdown" && now >= r.startAt) r.phase = "racing";
+        if (ticks % 30 === 0)
+          for (const [token, pending] of r.pending)
+            if (pending.until <= now) removePlayer(r, pending.id);
+        if (!rooms.has(r.code)) continue;
+        if (r.phase === "countdown" && now >= r.startAt) {
+          r.phase = "racing";
+          broadcast(r);
+        }
         if (r.phase !== "lobby")
           r.race.step(1 / 60, now, r.phase === "racing", r.startAt);
         if (r.phase === "racing") {
@@ -9096,15 +9486,23 @@ export async function createGame({ dev = false } = {}) {
             (cars.length > 0 && cars.every((c) => c.finished !== null)) ||
             (r.endAt && now >= r.endAt) ||
             now - r.startAt > 600000
-          )
+          ) {
             r.phase = "results";
+            broadcast(r);
+          }
         }
         if (
           ticks %
             (r.phase === "lobby" ? 30 : r.phase === "results" ? 12 : 2) ===
           0
         )
-          broadcast(r);
+          // Drop stale high-rate positions under backpressure, but deliver a
+          // reliable keyframe about every 233 ms to preserve phase and clock sync.
+          broadcast(
+            r,
+            (r.phase === "countdown" || r.phase === "racing") &&
+              ticks % 14 !== 0,
+          );
       }
       ticks++;
     }
@@ -9127,13 +9525,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     console.log("APEX racing: http://localhost:" + (process.env.PORT || 3000)),
   );
 }
-````
+```
 
 ## server/race.js
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/server/race.js`
 
-````
+```
 import { drive } from "../shared/driving.js";
 import * as C from "cannon-es";
 import { TRACK, LENGTH, point, nearest, gates } from "../shared/track.js";
@@ -9542,13 +9940,13 @@ export class Race {
     }));
   }
 }
-````
+```
 
 ## shared/contact.js
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/shared/contact.js`
 
-````
+```
 // Oriented chassis footprints, shared by physical reset placement and rendering.
 export const CAR_HALF_WIDTH = 1.28;
 export const CAR_HALF_LENGTH = 2.3;
@@ -9580,13 +9978,13 @@ export function overlap(a, b, padding = 0) {
   }
   return { ...normal, depth };
 }
-````
+```
 
 ## shared/driving.js
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/shared/driving.js`
 
-````
+```
 import { TRACK, nearest } from "./track.js";
 // Shared kinematic controller: authoritative server and bounded client prediction.
 export function drive(c, input, dt, active = true) {
@@ -9675,13 +10073,13 @@ export function predict(c, input, dt) {
     c.z += c.vz * dt;
   }
 }
-````
+```
 
 ## shared/protocol.js
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/shared/protocol.js`
 
-````
+```
 // Validate the complete snapshot at the network boundary, before UI/audio/3D see it.
 export function validSnapshot(s) {
   if (
@@ -9695,6 +10093,7 @@ export function validSnapshot(s) {
     s.raceId < 0 ||
     ![s.serverNow, s.startAt, s.endAt].every(Number.isFinite) ||
     !Array.isArray(s.players) ||
+    !Array.isArray(s.reconnecting) ||
     !Array.isArray(s.cars) ||
     s.players.length < 1 ||
     s.players.length > 6 ||
@@ -9714,6 +10113,12 @@ export function validSnapshot(s) {
       return false;
     ids.add(p.id);
   }
+  if (
+    s.reconnecting.length > s.players.length ||
+    new Set(s.reconnecting).size !== s.reconnecting.length ||
+    s.reconnecting.some((id) => !ids.has(id))
+  )
+    return false;
   if (!ids.has(s.host)) return false;
   const cars = new Set();
   for (const c of s.cars) {
@@ -9754,13 +10159,13 @@ export function validSnapshot(s) {
   }
   return true;
 }
-````
+```
 
 ## shared/track.js
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/shared/track.js`
 
-````
+```
 export const TRACK = {
   name: "Palm Circuit",
   width: 22,
@@ -9960,13 +10365,13 @@ export function nearest(x, z) {
 export const gates = Array.from({ length: 24 }, (_, i) =>
   point((i * LENGTH) / 24),
 );
-````
+```
 
 ## test/race.test.js
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/test/race.test.js`
 
-````
+```
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { io } from "socket.io-client";
@@ -10204,17 +10609,17 @@ test("six-player cap, spoof resistance, real disconnect host transfer and finish
   assert.equal(room.phase, "results");
   assert.ok(room.race.snapshot().some((c) => c.finished === null));
 });
-````
+```
 
 ## vite.config.js
 
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/vite.config.js`
 
-````
+```
 import { defineConfig } from "vite";
 export default defineConfig({
   root: "client",
   build: { outDir: "../dist", emptyOutDir: true },
   server: { host: "127.0.0.1" },
 });
-````
+```

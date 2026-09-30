@@ -1,11 +1,12 @@
 import express from "express";
 import { createServer } from "node:http";
-import { randomInt } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
 import { Race } from "./race.js";
 import { TRACK } from "../shared/track.js";
 export async function createGame({ dev = false } = {}) {
+  const RECONNECT_GRACE_MS = 30000;
   const app = express(),
     http = createServer(app),
     io = new Server(http, { maxHttpBufferSize: 2048 }),
@@ -37,36 +38,65 @@ export async function createGame({ dev = false } = {}) {
     startAt: r.startAt,
     serverNow: Date.now(),
     players: [...r.players.values()],
+    reconnecting: [...r.pending.values()].map((pending) => pending.id),
     cars: r.race.snapshot(),
     endAt: r.endAt,
   });
-  function broadcast(r) {
-    io.to(r.code).emit("state", state(r));
+  function broadcast(r, volatile = false) {
+    const packet = state(r);
+    if (volatile) io.volatile.to(r.code).emit("state", packet);
+    else io.to(r.code).emit("state", packet);
   }
-  function leave(s) {
-    const r = rooms.get(s.data.room);
-    if (!r) return;
-    const p = r.players.get(s.id);
-    r.players.delete(s.id);
-    r.race.remove(s.id);
-    s.leave(r.code);
-    s.data.room = null;
+  function removePlayer(r, id) {
+    const p = r.players.get(id);
+    if (!p) return;
+    r.players.delete(id);
+    r.race.remove(id);
+    r.tokens.delete(id);
+    for (const [token, pending] of r.pending)
+      if (pending.id === id) r.pending.delete(token);
     if (!r.players.size) {
       rooms.delete(r.code);
       return;
     }
-    if (r.host === s.id) r.host = r.players.keys().next().value;
+    if (r.host === id) r.host = r.players.keys().next().value;
     if (r.phase === "racing") {
       const remainingCars = [...r.race.cars.values()];
-      if (
-        remainingCars.length > 0 &&
-        remainingCars.every((c) => c.finished !== null)
-      ) {
-        r.phase = "results";
-      }
+      if (remainingCars.every((c) => c.finished !== null)) r.phase = "results";
     }
-    io.to(r.code).emit("notice", `${p?.name || "Player"} disconnected`);
+    io.to(r.code).emit("notice", `${p.name} disconnected`);
     broadcast(r);
+  }
+  function leave(s, disconnected = false) {
+    const r = rooms.get(s.data.room);
+    if (!r) return;
+    const p = r.players.get(s.id);
+    s.leave(r.code);
+    s.data.room = null;
+    const token = r.tokens.get(s.id);
+    if (disconnected && token && p) {
+      const c = r.race.cars.get(s.id);
+      if (c) {
+        c.input = {};
+        c.inputAt = 0;
+        c.inputSeq = 0;
+      }
+      r.pending.set(token, {
+        id: s.id,
+        until: Date.now() + RECONNECT_GRACE_MS,
+      });
+      if (r.host === s.id) {
+        const replacement = [...r.players.keys()].find(
+          (id) =>
+            id !== s.id && ![...r.pending.values()].some((v) => v.id === id),
+        );
+        if (replacement) r.host = replacement;
+      }
+      io.to(r.code).emit("notice", `${p.name} is reconnecting`);
+      broadcast(r);
+      return;
+    }
+    removePlayer(r, s.id);
   }
   io.on("connection", (s) => {
     let requests = 0,
@@ -86,15 +116,66 @@ export async function createGame({ dev = false } = {}) {
           if (typeof ack === "function") ack({ ok: true, ...result });
         } catch (e) {
           if (typeof ack === "function")
-            ack({ ok: false, error: e.message || "Request failed" });
+            ack({
+              ok: false,
+              error: e.message || "Request failed",
+              retryable: e.retryable === true,
+            });
         }
       });
     action("enter", (data) => {
       if (!data || typeof data !== "object") throw Error("Enter a nickname.");
+      if (s.data.room) throw Error("Leave your current room first.");
+      if (data.token !== undefined) {
+        if (
+          typeof data.code !== "string" ||
+          !/^[A-Z2-9]{5}$/.test(data.code) ||
+          typeof data.token !== "string" ||
+          !/^[A-Za-z0-9_-]{43}$/.test(data.token)
+        )
+          throw Error("Invalid reconnect details.");
+        const r = rooms.get(data.code);
+        if (!r) throw Error("Room not found. Ask your friend for a new code.");
+        const pending = r?.pending.get(data.token);
+        if (!pending && [...r.tokens.values()].includes(data.token)) {
+          const error = Error(
+            "Previous connection is still closing. Retrying...",
+          );
+          error.retryable = true;
+          throw error;
+        }
+        if (!pending || pending.until <= Date.now())
+          throw Error("Reconnect window expired. Join the next lobby.");
+        const oldId = pending.id;
+        const p = r.players.get(oldId),
+          c = r.race.cars.get(oldId);
+        if (!p || !c) throw Error("Racer is no longer available.");
+        r.pending.delete(data.token);
+        r.players.delete(oldId);
+        r.players.set(s.id, { ...p, id: s.id });
+        r.race.cars.delete(oldId);
+        c.id = s.id;
+        c.input = {};
+        c.inputAt = 0;
+        c.inputSeq = 0;
+        c.ack = 0;
+        r.race.cars.set(s.id, c);
+        r.tokens.delete(oldId);
+        r.tokens.set(s.id, data.token);
+        if (r.host === oldId) r.host = s.id;
+        else if (
+          [...r.pending.values()].some((pending) => pending.id === r.host)
+        )
+          r.host = s.id;
+        s.data.room = r.code;
+        s.join(r.code);
+        io.to(r.code).emit("notice", `${p.name} reconnected`);
+        broadcast(r);
+        return { code: r.code, token: data.token, resumed: true };
+      }
       const name = typeof data.name === "string" ? data.name.trim() : "";
       if (name.length < 1 || name.length > 18 || /[\x00-\x1f]/.test(name))
         throw Error("Use a nickname of 1–18 characters.");
-      if (s.data.room) throw Error("Leave your current room first.");
       let r;
       if (data.create === true) {
         if (rooms.size >= 100) throw Error("Server is full. Try later.");
@@ -102,7 +183,7 @@ export async function createGame({ dev = false } = {}) {
         do {
           code = Array.from(
             { length: 5 },
-            () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[randomInt(31)],
+            () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[randomInt(32)],
           ).join("");
         } while (rooms.has(code));
         r = {
@@ -110,6 +191,8 @@ export async function createGame({ dev = false } = {}) {
           host: s.id,
           phase: "lobby",
           players: new Map(),
+          tokens: new Map(),
+          pending: new Map(),
           race: new Race(),
           startAt: 0,
           endAt: 0,
@@ -130,17 +213,25 @@ export async function createGame({ dev = false } = {}) {
         ) || colors[r.players.size % colors.length];
       r.players.set(s.id, { id: s.id, name, color });
       r.race.add(s.id, r.players.size - 1);
+      const token =
+        data.resume === true ? randomBytes(32).toString("base64url") : null;
+      if (token) r.tokens.set(s.id, token);
       s.data.room = r.code;
       s.join(r.code);
       io.to(r.code).emit("notice", `${name} joined the race`);
       broadcast(r);
-      return { code: r.code };
+      return { code: r.code, ...(token ? { token } : {}) };
     });
     action("start", () => {
       const r = rooms.get(s.data.room);
       if (!r || r.host !== s.id) throw Error("Only the host can start.");
-      if (r.phase !== "lobby" || r.players.size < 2)
+      const activePlayers = [...r.players.keys()].filter(
+        (id) => ![...r.pending.values()].some((v) => v.id === id),
+      );
+      if (r.phase !== "lobby" || activePlayers.length < 2)
         throw Error("You need at least 2 players.");
+      if (r.pending.size)
+        throw Error("Wait for reconnecting racers before starting.");
       r.race = new Race();
       r.raceId = (r.raceId || 0) + 1;
       [...r.players.keys()].forEach((id, i) => r.race.add(id, i));
@@ -184,7 +275,7 @@ export async function createGame({ dev = false } = {}) {
       );
       c.inputAt = Date.now();
     });
-    s.on("disconnect", () => leave(s));
+    s.on("disconnect", () => leave(s, true));
   });
   let ticks = 0,
     lastTick = performance.now(),
@@ -199,7 +290,14 @@ export async function createGame({ dev = false } = {}) {
       steps++;
       const now = Date.now() - accumulator * 1000;
       for (const r of rooms.values()) {
-        if (r.phase === "countdown" && now >= r.startAt) r.phase = "racing";
+        if (ticks % 30 === 0)
+          for (const [token, pending] of r.pending)
+            if (pending.until <= now) removePlayer(r, pending.id);
+        if (!rooms.has(r.code)) continue;
+        if (r.phase === "countdown" && now >= r.startAt) {
+          r.phase = "racing";
+          broadcast(r);
+        }
         if (r.phase !== "lobby")
           r.race.step(1 / 60, now, r.phase === "racing", r.startAt);
         if (r.phase === "racing") {
@@ -210,15 +308,23 @@ export async function createGame({ dev = false } = {}) {
             (cars.length > 0 && cars.every((c) => c.finished !== null)) ||
             (r.endAt && now >= r.endAt) ||
             now - r.startAt > 600000
-          )
+          ) {
             r.phase = "results";
+            broadcast(r);
+          }
         }
         if (
           ticks %
             (r.phase === "lobby" ? 30 : r.phase === "results" ? 12 : 2) ===
           0
         )
-          broadcast(r);
+          // Drop stale high-rate positions under backpressure, but deliver a
+          // reliable keyframe about every 233 ms to preserve phase and clock sync.
+          broadcast(
+            r,
+            (r.phase === "countdown" || r.phase === "racing") &&
+              ticks % 14 !== 0,
+          );
       }
       ticks++;
     }

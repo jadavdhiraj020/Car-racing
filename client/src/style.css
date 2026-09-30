@@ -74,6 +74,18 @@ body:before {
 body.racing:before {
   background: none;
 }
+body.racing:after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at 50% 55%,
+    transparent 47%,
+    rgba(8, 25, 30, 0.15) 100%
+  );
+}
 header {
   position: fixed;
   top: 0;
@@ -556,7 +568,6 @@ footer,
   padding: 6px 12px;
   border-radius: 6px;
   background: rgba(11, 21, 33, 0.9);
-  backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-left: 3.5px solid var(--driver-color, #d6fc71);
   color: #fff;
@@ -568,6 +579,9 @@ footer,
   white-space: nowrap;
   will-change: transform, opacity;
   transform-origin: center bottom;
+}
+.driver-label[hidden] {
+  display: none;
 }
 .driver-label:after {
   content: "";

@@ -33,14 +33,49 @@ export function createScene(canvas, audioSystem = null) {
   scene.fogDensity = 0.0012;
   scene.fogColor = new Color3(0.58, 0.77, 0.74);
 
+  // A single unlit sky draw replaces the flat clear color with a soft,
+  // painterly horizon. The texture is generated locally and needs no download.
+  const skyTexture = new DynamicTexture(
+    "coastal sky gradient",
+    { width: 16, height: 512 },
+    scene,
+    false,
+  );
+  const skyContext = skyTexture.getContext();
+  const skyGradient = skyContext.createLinearGradient(0, 0, 0, 512);
+  skyGradient.addColorStop(0, "#286b96");
+  skyGradient.addColorStop(0.4, "#6cb7ce");
+  skyGradient.addColorStop(0.52, "#b6d9d3");
+  skyGradient.addColorStop(0.6, "#e1dabc");
+  skyGradient.addColorStop(0.8, "#94b9ae");
+  skyGradient.addColorStop(1, "#558c82");
+  skyContext.fillStyle = skyGradient;
+  skyContext.fillRect(0, 0, 16, 512);
+  skyTexture.update();
+  const skyMaterial = new StandardMaterial("coastal sky", scene);
+  skyMaterial.diffuseColor = Color3.Black();
+  skyMaterial.emissiveTexture = skyTexture;
+  skyMaterial.emissiveColor = Color3.Black();
+  skyMaterial.disableLighting = true;
+  skyMaterial.fogEnabled = false;
+  skyMaterial.backFaceCulling = false;
+  const skyDome = MeshBuilder.CreateSphere(
+    "sky dome",
+    { diameter: 2400, segments: 16, sideOrientation: Mesh.BACKSIDE },
+    scene,
+  );
+  skyDome.material = skyMaterial;
+  skyDome.infiniteDistance = true;
+  skyDome.isPickable = false;
+
   // Balanced hemispheric and directional lighting
   const skyLight = new HemisphericLight("sky", new Vector3(0, 1, 0), scene);
-  skyLight.intensity = 0.75;
+  skyLight.intensity = 0.63;
   skyLight.groundColor = new Color3(0.35, 0.45, 0.38);
 
   const sun = new DirectionalLight("sun", new Vector3(-0.6, -1.2, 0.5), scene);
   sun.position = new Vector3(120, 200, -100);
-  sun.intensity = 0.95;
+  sun.intensity = 1.08;
 
   let shadowGen = null;
   const glRenderer = engine.getGlInfo()?.renderer || "";
@@ -147,6 +182,69 @@ export function createScene(canvas, audioSystem = null) {
 
   // Surrounding turquoise lagoon
   box("ocean", 1600, 0.1, 1600, -20, -0.75, 5, water);
+
+  // Two distant low-poly ridge layers give the coast depth without terrain
+  // textures, draw-heavy props, or moving geometry.
+  for (const [layer, radius, ridgeColor] of [
+    [0, 550, "#5c827f"],
+    [1, 675, "#739994"],
+  ]) {
+    const foot = [],
+      crest = [];
+    for (let i = 0; i <= 96; i++) {
+      const angle = (i * Math.PI * 2) / 96;
+      const x = Math.cos(angle) * radius - 20;
+      const z = Math.sin(angle) * radius + 5;
+      const ridge =
+        16 +
+        Math.max(0, Math.sin(angle * 5 + layer) * 13) +
+        Math.max(0, Math.sin(angle * 11 - layer * 2) * 8);
+      foot.push(new Vector3(x, -14, z));
+      crest.push(new Vector3(x, ridge + layer * 9, z));
+    }
+    const silhouette = MeshBuilder.CreateRibbon(
+      "distant coastal ridge " + layer,
+      { pathArray: [foot, crest], sideOrientation: Mesh.DOUBLESIDE },
+      scene,
+    );
+    silhouette.material = material("ridge " + layer, ridgeColor, 0);
+    silhouette.isPickable = false;
+    silhouette.freezeWorldMatrix();
+  }
+
+  // Broad faceted cloud banks read as one distant layer after static batching.
+  const cloudMaterial = material("sunlit clouds", "#dce9de", 0);
+  cloudMaterial.emissiveColor = new Color3(0.1, 0.12, 0.1);
+  const cloudMeshes = [];
+  for (let i = 0; i < 11; i++) {
+    const angle = (i * Math.PI * 2) / 11 + 0.3;
+    const radius = 390 + (i % 3) * 58;
+    const baseX = Math.cos(angle) * radius - 20;
+    const baseZ = Math.sin(angle) * radius + 5;
+    const height = 55 + (i % 4) * 12;
+    for (let lobe = 0; lobe < 4; lobe++) {
+      const cloud = MeshBuilder.CreateSphere(
+        "cloud bank",
+        { diameter: 1, segments: 5 },
+        scene,
+      );
+      cloud.position.set(
+        baseX + (lobe - 1.5) * 7,
+        height + (lobe % 2) * 2.5,
+        baseZ + (lobe - 1.5) * 3,
+      );
+      cloud.scaling.set(17 + (lobe % 2) * 5, 4 + lobe, 8);
+      cloud.material = cloudMaterial;
+      cloud.isPickable = false;
+      cloudMeshes.push(cloud);
+    }
+  }
+  const cloudBanks = Mesh.MergeMeshes(cloudMeshes, true, true);
+  if (cloudBanks) {
+    cloudBanks.material = cloudMaterial;
+    cloudBanks.isPickable = false;
+    cloudBanks.freezeWorldMatrix();
+  }
 
   // Smooth wide road ribbon (22m wide)
   const edges = [-11, 11].map((offset) =>
@@ -642,7 +740,9 @@ export function createScene(canvas, audioSystem = null) {
     chassis.parent = root;
     chassis.position.y = -0.32;
 
-    const paint = finish(player.id, player.color, 0.42, 0.22);
+    const paint = finish(player.id, player.color, 0.32, 0.26);
+    paint.environmentIntensity = 0.4;
+    paint.clearCoat.intensity = 0.72;
     const helmetPaint = finish("helmet_" + player.id, player.color, 0.55, 0.22);
 
     // Soft contact shadow disc grounded directly beneath car
@@ -1361,6 +1461,10 @@ export function createScene(canvas, audioSystem = null) {
   const scratchAnchor = new Vector3();
   const identityMatrix = Matrix.Identity();
   const lookSpring = camera.getTarget().clone();
+  const cameraDesired = new Vector3();
+  const cameraLook = new Vector3();
+  const cameraOrbit = new Vector3();
+  const listenerForward = new Vector3();
   const frameTimes = new Float64Array(360);
   let frameCount = 0,
     failedFrames = 0,
@@ -1740,15 +1844,17 @@ export function createScene(canvas, audioSystem = null) {
         }
 
         c.lastImpact = t.impact || 0;
-        // Dynamic suspension pitch (squat on gas, dive on brake) and roll into turns
+        // Network speed changes at snapshot cadence. Filter it before deriving
+        // acceleration so the suspension does not pulse once per packet.
+        const nextSpeed = Number.isFinite(t.speed) ? t.speed : 0;
+        const previousSpeed = c.visualSpeed ?? nextSpeed;
+        c.visualSpeed =
+          previousSpeed +
+          (nextSpeed - previousSpeed) * (1 - Math.exp(-14 * dt));
         const acceleration = Math.max(
           -40,
-          Math.min(
-            30,
-            (t.speed - (c.lastSpeed ?? t.speed)) / Math.max(0.016, dt),
-          ),
+          Math.min(30, (c.visualSpeed - previousSpeed) / Math.max(0.001, dt)),
         );
-        c.lastSpeed = t.speed;
         c.load =
           (c.load || 0) +
           (acceleration - (c.load || 0)) * (1 - Math.exp(-7 * dt));
@@ -1844,15 +1950,15 @@ export function createScene(canvas, audioSystem = null) {
             : 0;
 
         // Smooth chase camera distance and height inspired by the solid 1fc22f6 feel
-        const camDist = 13.5 + Math.min(2.5, speed * 0.04);
-        const camHeight = 5.2 + Math.min(0.8, speed * 0.02);
+        const camDist = 8.9 + Math.min(2.4, speed * 0.045);
+        const camHeight = 3.5 + Math.min(0.9, speed * 0.018);
 
         const px = Number.isFinite(p.x) ? p.x : 120;
         const py = Number.isFinite(p.y) ? p.y : 0.55;
         const pz = Number.isFinite(p.z) ? p.z : 0;
         const safeYaw = Number.isFinite(yaw) ? yaw : 0;
 
-        const desired = new Vector3(
+        cameraDesired.set(
           px - Math.sin(safeYaw) * camDist,
           py + camHeight,
           pz - Math.cos(safeYaw) * camDist,
@@ -1861,10 +1967,11 @@ export function createScene(canvas, audioSystem = null) {
         const prevCamX = camera.position.x;
         const prevCamZ = camera.position.z;
 
-        camera.position = Vector3.Lerp(
+        Vector3.LerpToRef(
           camera.position,
-          desired,
+          cameraDesired,
           1 - Math.exp(-8 * dt),
+          camera.position,
         );
 
         // Validate camera.position sanity
@@ -1873,23 +1980,23 @@ export function createScene(canvas, audioSystem = null) {
           !Number.isFinite(camera.position.y) ||
           !Number.isFinite(camera.position.z)
         ) {
-          camera.position.copyFrom(desired);
+          camera.position.copyFrom(cameraDesired);
         }
 
         cameraVel.x = dt > 0 ? (camera.position.x - prevCamX) / dt : 0;
         cameraVel.z = dt > 0 ? (camera.position.z - prevCamZ) / dt : 0;
 
         // Look-ahead target anticipates corners
-        const lookDist = 7.5 + Math.min(5.0, speed * 0.1);
-        const lookTarget = new Vector3(
+        const lookDist = 8 + Math.min(5.0, speed * 0.1);
+        cameraLook.set(
           px + Math.sin(safeYaw) * lookDist,
           py + 1.25,
           pz + Math.cos(safeYaw) * lookDist,
         );
-        if (Vector3.DistanceSquared(camera.position, lookTarget) > 0.01) {
+        if (Vector3.DistanceSquared(camera.position, cameraLook) > 0.01) {
           Vector3.LerpToRef(
             lookSpring,
-            lookTarget,
+            cameraLook,
             1 - Math.exp(-10 * dt),
             lookSpring,
           );
@@ -1907,15 +2014,17 @@ export function createScene(canvas, audioSystem = null) {
         // Cinematic orbit in lobby / results
         const t = now * 0.00015;
         camera.fov += (0.82 - camera.fov) * (1 - Math.exp(-4 * dt));
+        cameraOrbit.set(120 + Math.sin(t) * 75, 55, Math.cos(t) * 75);
         Vector3.LerpToRef(
           camera.position,
-          new Vector3(120 + Math.sin(t) * 75, 55, Math.cos(t) * 75),
+          cameraOrbit,
           1 - Math.exp(-2 * dt),
           camera.position,
         );
+        cameraLook.set(120, 2, 0);
         Vector3.LerpToRef(
           lookSpring,
-          new Vector3(120, 2, 0),
+          cameraLook,
           1 - Math.exp(-3 * dt),
           lookSpring,
         );
@@ -1924,11 +2033,13 @@ export function createScene(canvas, audioSystem = null) {
       }
 
       try {
-        const fwd = camera.getTarget().subtract(camera.position);
-        const fwdLen = fwd.length();
+        listenerForward
+          .copyFrom(camera.getTarget())
+          .subtractInPlace(camera.position);
+        const fwdLen = listenerForward.length();
         if (fwdLen > 0.001) {
-          fwd.scaleInPlace(1 / fwdLen);
-          audioSystem?.listener(camera.position, fwd);
+          listenerForward.scaleInPlace(1 / fwdLen);
+          audioSystem?.listener(camera.position, listenerForward);
         }
       } catch {}
       const renderStart = performance.now(),

@@ -58,6 +58,7 @@ export class EngineAudio {
     this.lastPop = 0;
     this.lastThrottle = false;
     this.remoteCars = new Map();
+    this.nextListenerUpdate = 0;
   }
 
   track(node) {
@@ -141,6 +142,9 @@ export class EngineAudio {
     if (value) {
       this.cancelEffects();
       this.music?.stop();
+      // A hidden tab has no useful listener updates. Retire the spatial
+      // oscillators now instead of leaving them running at stale positions.
+      for (const id of [...this.remoteCars.keys()]) this.removeRemoteCar(id);
     } else if (this.enabled) this.music?.start();
     this.applyMix();
   }
@@ -174,6 +178,7 @@ export class EngineAudio {
     this.sources.clear();
     this.nodes.clear();
     this.remoteCars.clear();
+    this.nextListenerUpdate = 0;
     this.music = null;
     const ctx = this.ctx;
     this.ctx = null;
@@ -200,6 +205,7 @@ export class EngineAudio {
     if (!AC) throw new Error("Web Audio unavailable");
     const ctx = new AC();
     this.ctx = ctx;
+    this.nextListenerUpdate = 0;
 
     // Master bus with multiband limiting
     const limiter = this.track(ctx.createDynamicsCompressor());
@@ -400,14 +406,24 @@ export class EngineAudio {
     let gear = this.gear;
 
     const safeSpeed = Number.isFinite(speed) ? speed : 0;
-    if (safeSpeed > (gearThresholds[gear - 1] ?? Infinity) && gear < 6) {
+    if (
+      racing &&
+      !finished &&
+      safeSpeed > (gearThresholds[gear - 1] ?? Infinity) &&
+      gear < 6
+    ) {
       // Upshift: ignition cut and exhaust crackle
       gear++;
       this.gear = gear;
       this.shiftUntil = now + 65;
       this.shiftType = "up";
       this.exhaustPop(0.7);
-    } else if (gear > 1 && safeSpeed < gearThresholds[gear - 2] - 3.5) {
+    } else if (
+      racing &&
+      !finished &&
+      gear > 1 &&
+      safeSpeed < gearThresholds[gear - 2] - 3.5
+    ) {
       // Downshift: rev-match throttle blip
       gear--;
       this.gear = gear;
@@ -416,7 +432,11 @@ export class EngineAudio {
       this.exhaustPop(0.4);
     }
 
-    if (!racing) gear = 1;
+    if (!racing || finished) {
+      gear = 1;
+      this.shiftUntil = 0;
+      this.shiftType = "";
+    }
     this.gear = gear;
 
     // Calculate realistic F1 RPM curve
@@ -480,9 +500,10 @@ export class EngineAudio {
         }
       }
 
-      // F1 engine acoustics: fundamental cylinder firing frequency
-      // (V6 at 12,000 RPM fires 600 times per second)
-      const baseFreq = Math.max(38, (this.rpm / 60) * 1.5);
+      // A four-stroke V6 has three firing pulses per crank revolution.
+      // At 12,000 RPM its firing fundamental is 600 Hz; the sub voice
+      // preserves low body while the upper voices carry the racing tone.
+      const baseFreq = Math.max(38, (this.rpm / 60) * 3);
       const cut = (isShifting ? 0.15 : 1.0) * limiterCut;
 
       // Frequency modulation for organic combustion feel
@@ -800,7 +821,7 @@ export class EngineAudio {
     carVel = null,
     camVel = null,
   ) {
-    if (!this.ctx || !this.enabled) return;
+    if (!this.ctx || !this.enabled || this.suspended) return;
     if (
       !carPos ||
       !camPos ||
@@ -847,13 +868,17 @@ export class EngineAudio {
         panner.connect(this.master);
 
         osc.start(t);
-        node = { panner, osc, filter, gain };
+        node = { panner, osc, filter, gain, nextUpdate: 0 };
         this.remoteCars.set(id, node);
       } catch {
         return;
       }
     }
 
+    // AudioParams interpolate between targets. Updating at 30 Hz is enough
+    // for continuous motion and halves automation work during a full grid.
+    if (t < node.nextUpdate) return;
+    node.nextUpdate = t + 1 / 30;
     try {
       if (node.panner.positionX) {
         node.panner.positionX.setTargetAtTime(carPos.x, t, 0.04);
@@ -886,7 +911,7 @@ export class EngineAudio {
       );
       const targetVol = Math.min(
         0.32,
-        (safeSpeed / 45) * 0.32 * (throttle ? 1.0 : 0.6),
+        (0.045 + (safeSpeed / 45) * 0.275) * (throttle ? 1.0 : 0.72),
       );
       node.gain.gain.setTargetAtTime(targetVol, t, 0.04);
     } catch {}
@@ -930,6 +955,8 @@ export class EngineAudio {
     if (forwardLen < 0.001) return;
     const l = this.ctx.listener,
       t = this.ctx.currentTime;
+    if (t < this.nextListenerUpdate) return;
+    this.nextListenerUpdate = t + 1 / 30;
     try {
       if (l.forwardX) {
         const params = {

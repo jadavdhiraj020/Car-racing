@@ -176,6 +176,64 @@ $("quality").onclick = () => {
 const invite = new URLSearchParams(location.search).get("room");
 if (invite) $("code").value = invite.toUpperCase().slice(0, 5);
 
+const resumeStorageKey = "apex-race-resume";
+let resumeSession = null;
+let resumeTimer = null;
+let resumeGeneration = 0;
+let resumeDeadline = 0;
+try {
+  const saved = JSON.parse(sessionStorage.getItem(resumeStorageKey));
+  if (
+    saved &&
+    /^[A-Z2-9]{5}$/.test(saved.code) &&
+    typeof saved.token === "string" &&
+    saved.token.length >= 32 &&
+    (!invite || invite.toUpperCase() === saved.code)
+  )
+    resumeSession = saved;
+} catch {}
+
+function clearResume() {
+  resumeGeneration++;
+  clearTimeout(resumeTimer);
+  resumeTimer = null;
+  resumeSession = null;
+  resumeDeadline = 0;
+  try {
+    sessionStorage.removeItem(resumeStorageKey);
+  } catch {}
+}
+
+function rememberResume(code, token) {
+  if (!/^[A-Z2-9]{5}$/.test(code) || typeof token !== "string") return;
+  resumeGeneration++;
+  clearTimeout(resumeTimer);
+  resumeTimer = null;
+  resumeSession = { code, token };
+  resumeDeadline = 0;
+  try {
+    sessionStorage.setItem(resumeStorageKey, JSON.stringify(resumeSession));
+  } catch {}
+}
+
+function tryResume() {
+  if (!resumeSession || !socket.connected || state) return;
+  if (!resumeDeadline) resumeDeadline = Date.now() + 32000;
+  const generation = ++resumeGeneration;
+  socket.timeout(5000).emit("enter", resumeSession, (error, result) => {
+    if (generation !== resumeGeneration || !resumeSession) return;
+    if (!error && result?.ok && result.resumed) {
+      rememberResume(result.code, result.token);
+      notice("Race connection restored.");
+    } else if ((error || result?.retryable) && Date.now() < resumeDeadline) {
+      resumeTimer = setTimeout(tryResume, 700);
+    } else {
+      clearResume();
+      notice("Your race seat expired. Join the next lobby with your friends.");
+    }
+  });
+}
+
 function request(event, data = {}) {
   return new Promise((resolve) => {
     if (!socket.connected) {
@@ -191,19 +249,31 @@ function request(event, data = {}) {
   });
 }
 
-$("create").onclick = () =>
-  request("enter", { name: $("nickname").value, create: true });
-$("join").onclick = () =>
-  request("enter", {
+$("create").onclick = async () => {
+  clearResume();
+  const result = await request("enter", {
+    name: $("nickname").value,
+    create: true,
+    resume: true,
+  });
+  if (result?.token) rememberResume(result.code, result.token);
+};
+$("join").onclick = async () => {
+  clearResume();
+  const result = await request("enter", {
     name: $("nickname").value,
     code: $("code").value.trim().toUpperCase(),
+    resume: true,
   });
+  if (result?.token) rememberResume(result.code, result.token);
+};
 $("start").onclick = () => request("start");
 $("rematch").onclick = () => request("rematch");
 document.querySelectorAll(".leave").forEach(
   (b) =>
     (b.onclick = async () => {
       if (await request("leave")) {
+        clearResume();
         state = null;
         clearControls();
         engineAudio.setPhase("home");
@@ -237,6 +307,7 @@ socket.on("connect", () => {
   syncClock();
   setTimeout(syncClock, 350);
   setTimeout(syncClock, 1200);
+  if (resumeSession) tryResume();
 });
 
 socket.on("disconnect", () => {
@@ -248,7 +319,9 @@ socket.on("disconnect", () => {
   render();
   view?.update({ cars: [], players: [], phase: "lobby" }, socket.id);
   notice(
-    "Disconnected. When connected, rejoin the lobby with your code. An active race cannot be rejoined.",
+    resumeSession
+      ? "Connection lost. Reconnecting to your race…"
+      : "Disconnected. When connected, rejoin the lobby with your code.",
   );
 });
 
@@ -315,24 +388,27 @@ function render() {
   if (!state) return;
 
   const host = state.host === socket.id;
+  const reconnecting = new Set(state.reconnecting || []);
   $("roomCode").textContent = state.code;
   setHtml(
     "players",
     state.players
       .map(
         (p) =>
-          `<div class="player"><i class="swatch" style="background:${p.color}"></i>${esc(p.name)}<span class="badge">${p.id === state.host ? "HOST" : "DRIVER"}</span></div>`,
+          `<div class="player"><i class="swatch" style="background:${p.color}"></i>${esc(p.name)}<span class="badge">${reconnecting.has(p.id) ? "RECONNECTING" : p.id === state.host ? "HOST" : "DRIVER"}</span></div>`,
       )
       .join(""),
   );
   $("start").hidden = !host;
-  $("start").disabled = state.players.length < 2;
+  $("start").disabled = state.players.length < 2 || reconnecting.size > 0;
   $("waiting").textContent =
     `${state.players.length} / 6 drivers · ` +
     (host
-      ? state.players.length < 2
-        ? "Invite a friend to start."
-        : "Everyone in? Start when ready."
+      ? reconnecting.size > 0
+        ? "Waiting for reconnecting drivers…"
+        : state.players.length < 2
+          ? "Invite a friend to start."
+          : "Everyone in? Start when ready."
       : "Waiting for host to start…");
 
   const rows = ordered(),

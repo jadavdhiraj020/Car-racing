@@ -4,18 +4,18 @@ Checked 2026-09-20 through 2026-09-24 on Windows, Node.js 24.19.0 and Chrome usi
 
 ## Audit and fixes
 
-| Priority | Reproduced problem or audit finding | Change |
-| --- | --- | --- |
-| P0 | Render frames threw ReferenceError and assignment-to-constant errors; recovery warnings hid a broken 3D view even though build/server tests passed | Repair target yaw/time bindings and mutable height; count failed frames and surface the first render error |
-| P1 | Raw oversized delta reached Cannon despite a locally clamped value; invalid transforms could contaminate contact solving | Bound the complete simulation step, reject invalid deltas, repair nonfinite car state before stepping |
-| P1 | Delayed/reordered or malformed snapshots could reach HUD, transforms and audio | Validate complete snapshots and reject stale sequence numbers; track race generation |
-| P1 | High-speed drift yaw and instantaneous lateral cancellation produced abrupt handling | Bound lateral acceleration/yaw authority and preserve damped lateral inertia in shared server/prediction handling |
-| P1 | Variable-step prediction and independently adjusted interpolation could disagree during contact | Fixed-step local prediction, one frame timeline, conservative contact fallback, bounded extrapolation and residual oriented visual separation |
-| P1 | Stale commands survived reset or were reported as active throttle; redundant bindings released held controls | Snapshot effective controls; clear reset commands; aggregate independent keyboard and pointer sources; clear them on blur, hide, disconnect and leave |
-| P1 | Audio transients, remote voices and music needed explicit ownership across state changes | Owned node/source/timer cleanup, bounded music voices, envelope ramps, remote range hysteresis, cancellation on mute/phase/hide |
-| P2 | Camera aim and lobby transitions snapped; wheels always spun forward | Damped aim/position/FOV, signed wheel rotation, bounded load-based body and suspension motion |
-| P2 | Repeated track scans, identical DOM writes and layout reads consumed frame budget | Exact spatial rejection in nearest-track search, cached HTML, batched HUD rectangles, bounded adaptive resolution |
-| P2 | Requested music/mixer and Ultra tier were missing | Original quiet procedural ambient score, four independent mixer controls, four graphics tiers |
+| Priority | Reproduced problem or audit finding                                                                                                                | Change                                                                                                                                                |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0       | Render frames threw ReferenceError and assignment-to-constant errors; recovery warnings hid a broken 3D view even though build/server tests passed | Repair target yaw/time bindings and mutable height; count failed frames and surface the first render error                                            |
+| P1       | Raw oversized delta reached Cannon despite a locally clamped value; invalid transforms could contaminate contact solving                           | Bound the complete simulation step, reject invalid deltas, repair nonfinite car state before stepping                                                 |
+| P1       | Delayed/reordered or malformed snapshots could reach HUD, transforms and audio                                                                     | Validate complete snapshots and reject stale sequence numbers; track race generation                                                                  |
+| P1       | High-speed drift yaw and instantaneous lateral cancellation produced abrupt handling                                                               | Bound lateral acceleration/yaw authority and preserve damped lateral inertia in shared server/prediction handling                                     |
+| P1       | Variable-step prediction and independently adjusted interpolation could disagree during contact                                                    | Fixed-step local prediction, one frame timeline, conservative contact fallback, bounded extrapolation and residual oriented visual separation         |
+| P1       | Stale commands survived reset or were reported as active throttle; redundant bindings released held controls                                       | Snapshot effective controls; clear reset commands; aggregate independent keyboard and pointer sources; clear them on blur, hide, disconnect and leave |
+| P1       | Audio transients, remote voices and music needed explicit ownership across state changes                                                           | Owned node/source/timer cleanup, bounded music voices, envelope ramps, remote range hysteresis, cancellation on mute/phase/hide                       |
+| P2       | Camera aim and lobby transitions snapped; wheels always spun forward                                                                               | Damped aim/position/FOV, signed wheel rotation, bounded load-based body and suspension motion                                                         |
+| P2       | Repeated track scans, identical DOM writes and layout reads consumed frame budget                                                                  | Exact spatial rejection in nearest-track search, cached HTML, batched HUD rectangles, bounded adaptive resolution                                     |
+| P2       | Requested music/mixer and Ultra tier were missing                                                                                                  | Original quiet procedural ambient score, four independent mixer controls, four graphics tiers                                                         |
 
 The existing room, race, checkpoint, results, rematch and same-origin deployment architecture is preserved. This remains a believable arcade handling model: suspension/body load is animated, not a full tire and suspension simulator. The existing flowing 22 m wide circuit is retained. The validated WebGL2 path is retained; WebGPU was not introduced.
 
@@ -38,18 +38,18 @@ The existing room, race, checkpoint, results, rematch and same-origin deployment
 
 Two native-GPU Chrome clients share this machine's GPU. Medium may adapt its internal resolution; these measurements are observations, not universal 60 FPS guarantees.
 
-| Measurement | Observation |
-| --- | --- |
-| Sustained race viewport | 1280 x 800 per client |
-| Late-race frame interval | 20.54 / 20.55 ms mean (about 49 FPS); p95 24.4 / 24.5 ms over each client's latest 360 frames |
-| CPU time inside scene.render at final sample | 2.6 / 7.8 ms; excludes asynchronous GPU work |
-| Draw calls at final sample | 67 / 100; depends on each camera's visible objects |
-| Scene objects throughout race/rematch checks | 573 meshes, 49 materials, 14 textures; no growth observed |
-| Post-GC JS heap at 3 / 36 / 68 / 102 seconds, client 1 | 23.27 / 23.98 / 24.29 / 23.69 MB |
-| Post-GC JS heap at same points, client 2 | 22.81 / 23.60 / 23.74 / 23.40 MB |
-| Audio after mute and envelope completion | 33 nodes, 9 reusable continuous sources, 0 music voices, 0 remote cars, 0 transient timers |
-| Final six-car, 900-tick simulation with deterministic random controls | Mean 1.28 ms, p95 2.22 ms per tick |
-| Measured racing snapshots over 3 seconds | 29.62 Hz, approximately 25.4 kB/s of JSON payload per receiving client for two cars; excludes transport overhead |
+| Measurement                                                           | Observation                                                                                                      |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Sustained race viewport                                               | 1280 x 800 per client                                                                                            |
+| Late-race frame interval                                              | 20.54 / 20.55 ms mean (about 49 FPS); p95 24.4 / 24.5 ms over each client's latest 360 frames                    |
+| CPU time inside scene.render at final sample                          | 2.6 / 7.8 ms; excludes asynchronous GPU work                                                                     |
+| Draw calls at final sample                                            | 67 / 100; depends on each camera's visible objects                                                               |
+| Scene objects throughout race/rematch checks                          | 573 meshes, 49 materials, 14 textures; no growth observed                                                        |
+| Post-GC JS heap at 3 / 36 / 68 / 102 seconds, client 1                | 23.27 / 23.98 / 24.29 / 23.69 MB                                                                                 |
+| Post-GC JS heap at same points, client 2                              | 22.81 / 23.60 / 23.74 / 23.40 MB                                                                                 |
+| Audio after mute and envelope completion                              | 33 nodes, 9 reusable continuous sources, 0 music voices, 0 remote cars, 0 transient timers                       |
+| Final six-car, 900-tick simulation with deterministic random controls | Mean 1.28 ms, p95 2.22 ms per tick                                                                               |
+| Measured racing snapshots over 3 seconds                              | 29.62 Hz, approximately 25.4 kB/s of JSON payload per receiving client for two cars; excludes transport overhead |
 
 Heap variation and stable object counts show no accumulating leak in these runs. They do not replace a multi-hour soak. Earlier software-rendered Chrome was much slower than native GPU rendering. Hardware acceleration is required for practical play.
 
@@ -92,6 +92,17 @@ For manual multiplayer verification, create/join a room in two independent brows
 - Made adaptive resolution react after 2 seconds instead of 4 when frame time exceeds 20 ms, and guarded camera velocity against a zero-duration frame. Resolution reached its medium-quality cap during one heavily loaded two-client run; the measured mean remained 27–32 ms, so this machine did not hold 60 FPS with two simultaneous clients.
 - Production build, eight existing Node tests, native-GPU two-client browser smoke run, crash/contact/rejoin stress run, and five race/rematch cycles passed. The unmodified software-rendered browser check timed out at rematch while Chrome was heavily loaded; the equivalent native-GPU run passed. No new test files were created.
 
+## 2026-09-30 reconnection, audio and presentation follow-up
+
+- A dropped Socket.IO connection now reserves its seat and authoritative car for 30 seconds. A temporary per-tab token resumes the same car and progress after connection recovery or refresh, including during a race. A second use of the token was rejected, host control transferred to an active racer, and a pending seat expired correctly in direct Socket.IO checks.
+- High-rate countdown and racing snapshots are now volatile with a reliable keyframe about every 233 ms, preventing a queued stream of obsolete car positions from building up during congestion. Phase transitions remain reliable. The client identifies pending drivers and prevents START while a lobby seat is reconnecting.
+- A real two-browser race refresh kept both drivers and cars, preserved the returning driver's server car object, and accepted fresh input after the socket ID changed. Refreshing the host transferred host control; results and rematch still worked. Browser tests reported no page errors. These were local loopback checks, not a simulation of public-internet packet loss.
+- Finished cars no longer trigger repeated gear/exhaust sounds from residual speed. Spatial opponent voices retire when suspended, and listener/opponent audio automation runs at up to 30 Hz. Engine firing tone now uses the correct three pulses per revolution for the procedural V6 model. Two-client sound toggles, two rematch cycles and a forced reconnect had no retained remote audio source or page error.
+- Moving name labels hide correctly when their cars leave view; camera and audio-listener vectors are reused, and suspension responds to filtered speed. A two-client native-GPU render/reconnect check reported zero failed render frames and page errors, with mean frame intervals of 20.3 / 21.5 ms and p95 of 28.6 / 31.5 ms on the tested machine. This does not establish a locked 60 FPS.
+- The eight existing Node tests and direct randomized six-car, 6,000-step server simulation passed; that simulation's largest residual overlap was 5.4 cm. `npm audit --omit=dev --audit-level=moderate` reported zero production-package vulnerabilities. No test files were added.
+- The final art pass added a generated sky, coastal ridges and clouds, a closer chase camera, richer lighting and car paint, and a subtle vignette. Its final two-client native-GPU browser run measured 21.3 / 23.2 ms mean frame intervals (p95 28.6 / 29.4 ms), zero failed frames and zero page errors. These measurements remain below a locked 60 FPS target on this machine.
+- After integrating all changes, the production build and native-GPU two-browser smoke check passed. The existing crash stress script was updated for the new 30-second reconnect grace; all seven scenarios then passed, including seat expiry followed by lobby rejoin. The existing five-cycle race/rematch stress script passed with zero errors. No new test files were created.
+
 ## NOT TESTED and practical limits
 
 - Public deployment: NOT TESTED. No deployed URL was available. Render configuration, health route and same-origin networking remain intact; a Git push does not prove that a public deployment succeeded.
@@ -99,5 +110,5 @@ For manual multiplayer verification, create/join a room in two independent brows
 - Audio is procedural motorsport-inspired synthesis, not sampled real F1 recordings. Perceived engine/music quality has not been independently rated.
 - The tested machine does not sustain locked 60 FPS with two simultaneous 3D clients. Adaptive resolution is bounded; select Low or use one client per machine for more headroom.
 - No overlap/pass-through was observed in the stated checks. Finite simulation and arbitrary networking conditions cannot establish an absolute guarantee for every possible collision.
-- A full transport disconnect removes that driver and may transfer host. Rejoining an active race remains disabled; reconnecting players join the next lobby.
+- A returning browser can reclaim its seat for 30 seconds while the same server process stays alive. A new browser without the seat token cannot join an active race; reconnect behavior across server restarts is unavailable because room state is in memory.
 - Rooms remain in memory. Server restarts/deployments clear them.

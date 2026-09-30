@@ -6,7 +6,9 @@ const game = await createGame();
 await new Promise((resolve) => game.http.listen(0, "127.0.0.1", resolve));
 const base = `http://127.0.0.1:${game.http.address().port}`;
 
-console.log(`Starting APEX Critical Crash & Stability Stress Test on ${base}...`);
+console.log(
+  `Starting APEX Critical Crash & Stability Stress Test on ${base}...`,
+);
 
 const browser = await chromium.launch({
   channel: "chrome",
@@ -32,7 +34,10 @@ const p1 = await context1.newPage();
 const p2 = await context2.newPage();
 const errors = [];
 
-for (const [name, p] of [["P1", p1], ["P2", p2]]) {
+for (const [name, p] of [
+  ["P1", p1],
+  ["P2", p2],
+]) {
   p.on("pageerror", (e) => {
     console.error(`[${name} PageError]`, e.message);
     errors.push(`${name} PageError: ${e.message}`);
@@ -64,7 +69,10 @@ try {
   await p2.locator("#lobby").waitFor({ state: "visible" });
 
   await p1.bringToFront();
-  await p1.locator("#players .player").filter({ hasText: "RacerBeta" }).waitFor();
+  await p1
+    .locator("#players .player")
+    .filter({ hasText: "RacerBeta" })
+    .waitFor();
 
   console.log("Both racers connected to lobby. Starting Race 1...");
 
@@ -74,8 +82,14 @@ try {
   await p1.locator("#start").click();
 
   await Promise.all([
-    p1.locator("#countdown").filter({ hasText: /^[123]$/ }).waitFor(),
-    p2.locator("#countdown").filter({ hasText: /^[123]$/ }).waitFor(),
+    p1
+      .locator("#countdown")
+      .filter({ hasText: /^[123]$/ })
+      .waitFor(),
+    p2
+      .locator("#countdown")
+      .filter({ hasText: /^[123]$/ })
+      .waitFor(),
   ]);
 
   await p1.waitForFunction(() => window.__getState()?.phase === "racing");
@@ -94,16 +108,26 @@ try {
   await p1.waitForTimeout(3500);
 
   const speed1 = Number(await p1.locator("#speed").textContent());
-  assert.ok(speed1 > 120, `Driver 1 should reach high speed, got ${speed1} km/h`);
+  assert.ok(
+    speed1 > 120,
+    `Driver 1 should reach high speed, got ${speed1} km/h`,
+  );
   assert.ok(Number.isFinite(speed1), "Speed must be finite (not NaN)");
 
   // Check UI state on p1
-  const rpm1 = await p1.evaluate(() => document.getElementById("rpm")?.style.getPropertyValue("--rpm"));
-  assert.ok(Number.isFinite(parseFloat(rpm1)), `RPM CSS variable must be finite, got ${rpm1}`);
+  const rpm1 = await p1.evaluate(() =>
+    document.getElementById("rpm")?.style.getPropertyValue("--rpm"),
+  );
+  assert.ok(
+    Number.isFinite(parseFloat(rpm1)),
+    `RPM CSS variable must be finite, got ${rpm1}`,
+  );
 
   console.log(`Max speed reached: ${speed1} km/h, RPM var: ${rpm1}.`);
 
-  console.log("TEST 2: Intentional High-Speed Wall Crashes (steering hard into barrier)...");
+  console.log(
+    "TEST 2: Intentional High-Speed Wall Crashes (steering hard into barrier)...",
+  );
   // Hard turn right into barrier at high speed
   await p1.bringToFront();
   await p1.keyboard.down("d");
@@ -123,7 +147,11 @@ try {
   const room = game.rooms.get(code);
   assert.ok(room, "Room must exist");
   for (const car of room.race.cars.values()) {
-    assert.equal(car.b.position.y, 0.55, "Car must stay strictly grounded at y=0.55");
+    assert.equal(
+      car.b.position.y,
+      0.55,
+      "Car must stay strictly grounded at y=0.55",
+    );
     assert.equal(car.b.velocity.y, 0, "Vertical velocity must stay at 0");
     assert.ok(Number.isFinite(car.b.position.x), "Car x must be finite");
     assert.ok(Number.isFinite(car.b.position.z), "Car z must be finite");
@@ -133,7 +161,9 @@ try {
     const speed = Math.hypot(car.b.velocity.x, car.b.velocity.z);
     assert.ok(speed <= 52, `Car speed must be clamped <= 52 m/s, got ${speed}`);
   }
-  console.log("PASS: Wall crashes contained car safely on track with finite physics.");
+  console.log(
+    "PASS: Wall crashes contained car safely on track with finite physics.",
+  );
 
   console.log("TEST 3: Intentional Car-to-Car Collisions...");
   // Ram Driver 1 into Driver 2
@@ -151,10 +181,21 @@ try {
 
   assert.ok(Number.isFinite(carA.b.velocity.z), "CarA vz must be finite");
   assert.ok(Number.isFinite(carB.b.velocity.z), "CarB vz must be finite");
-  assert.ok(Math.hypot(carA.b.velocity.x, carA.b.velocity.z) <= 52, "CarA speed <= 52");
-  assert.ok(Math.hypot(carB.b.velocity.x, carB.b.velocity.z) <= 52, "CarB speed <= 52");
-  assert.ok(carA.b.position.y === 0.55 && carB.b.position.y === 0.55, "Cars remain grounded");
-  console.log("PASS: Direct head-on car collision resolved safely with zero explosion.");
+  assert.ok(
+    Math.hypot(carA.b.velocity.x, carA.b.velocity.z) <= 52,
+    "CarA speed <= 52",
+  );
+  assert.ok(
+    Math.hypot(carB.b.velocity.x, carB.b.velocity.z) <= 52,
+    "CarB speed <= 52",
+  );
+  assert.ok(
+    carA.b.position.y === 0.55 && carB.b.position.y === 0.55,
+    "Cars remain grounded",
+  );
+  console.log(
+    "PASS: Direct head-on car collision resolved safely with zero explosion.",
+  );
 
   console.log("TEST 4: Drifting Through Sweeping Turns...");
   await p1.bringToFront();
@@ -217,13 +258,22 @@ try {
   console.log("TEST 7: Disconnect and Rejoin...");
   await p2.close();
   await p1.bringToFront();
-  await p1.waitForFunction(() => window.__getState()?.players.length === 1);
-  console.log("Player 2 disconnected; room updated to 1 player.");
+  await p1.waitForFunction(
+    () => window.__getState()?.reconnecting?.length === 1,
+  );
+  console.log("Player 2 disconnected; seat reserved for reconnection.");
+  await p1.waitForFunction(
+    () => window.__getState()?.players.length === 1,
+    undefined,
+    { timeout: 45000 },
+  );
+  console.log("Reconnect grace expired; room updated to 1 player.");
 
   const p2New = await context2.newPage();
   p2New.on("pageerror", (e) => errors.push(`P2New PageError: ${e.message}`));
   p2New.on("console", (msg) => {
-    if (msg.type() === "error") errors.push(`P2New ConsoleError: ${msg.text()}`);
+    if (msg.type() === "error")
+      errors.push(`P2New ConsoleError: ${msg.text()}`);
   });
 
   await p2New.goto(`${base}/?room=${code}`);
@@ -234,7 +284,10 @@ try {
   await p2New.locator("#lobby").waitFor({ state: "visible" });
 
   await p1.bringToFront();
-  await p1.locator("#players .player").filter({ hasText: "RacerBetaRejoined" }).waitFor();
+  await p1
+    .locator("#players .player")
+    .filter({ hasText: "RacerBetaRejoined" })
+    .waitFor();
   console.log("Player 2 successfully rejoined the lobby!");
 
   assert.deepEqual(errors, [], `Expected 0 errors, got: ${errors.join("; ")}`);

@@ -11,6 +11,7 @@ export function validSnapshot(s) {
     s.raceId < 0 ||
     ![s.serverNow, s.startAt, s.endAt].every(Number.isFinite) ||
     !Array.isArray(s.players) ||
+    !Array.isArray(s.reconnecting) ||
     !Array.isArray(s.cars) ||
     s.players.length < 1 ||
     s.players.length > 6 ||
@@ -30,6 +31,12 @@ export function validSnapshot(s) {
       return false;
     ids.add(p.id);
   }
+  if (
+    s.reconnecting.length > s.players.length ||
+    new Set(s.reconnecting).size !== s.reconnecting.length ||
+    s.reconnecting.some((id) => !ids.has(id))
+  )
+    return false;
   if (!ids.has(s.host)) return false;
   const cars = new Set();
   for (const c of s.cars) {
