@@ -1,6 +1,6 @@
-import { TRACK, nearest } from "./track.js";
+import { getTrack } from "./track.js";
 // Shared kinematic controller: authoritative server and bounded client prediction.
-export function drive(c, input, dt, active = true) {
+export function drive(c, input, dt, active = true, track = getTrack()) {
   if (!Number.isFinite(dt) || dt <= 0) return;
   dt = Math.min(dt, 1 / 30);
   input = active ? input || {} : {};
@@ -59,8 +59,8 @@ export function drive(c, input, dt, active = true) {
 
   // Off-road grass friction (slight drag outside the asphalt road)
   if (Number.isFinite(c.x) && Number.isFinite(c.z)) {
-    const distFromCenter = nearest(c.x, c.z).distance;
-    if (distFromCenter > TRACK.width / 2) {
+    const distFromCenter = track.nearest(c.x, c.z).distance;
+    if (distFromCenter > track.width / 2) {
       speed *= Math.exp(-1.4 * dt);
     }
   }
@@ -71,7 +71,7 @@ export function drive(c, input, dt, active = true) {
   c.vx = Number.isFinite(v.x) ? v.x : 0;
   c.vz = Number.isFinite(v.z) ? v.z : 0;
 }
-export function predict(c, input, dt) {
+export function predict(c, input, dt, track = getTrack()) {
   if (
     !Number.isFinite(dt) ||
     dt <= 0 ||
@@ -80,7 +80,7 @@ export function predict(c, input, dt) {
   )
     return;
   dt = Math.min(dt, 1 / 30);
-  drive(c, input, dt);
+  drive(c, input, dt, true, track);
   if (Number.isFinite(c.vx) && Number.isFinite(c.vz)) {
     c.x += c.vx * dt;
     c.z += c.vz * dt;

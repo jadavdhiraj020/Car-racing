@@ -95,7 +95,7 @@ try {
   await p1.waitForFunction(() => window.__getState()?.phase === "racing");
   await p2.waitForFunction(() => window.__getState()?.phase === "racing");
 
-  console.log("TEST 1: Accelerating to Maximum Speed (> 140 km/h)...");
+  console.log("TEST 1: Accelerating above 120 km/h...");
   await p2.bringToFront();
   await p2.evaluate(() => window.focus());
   await p2.keyboard.down("w");
@@ -168,12 +168,17 @@ try {
   console.log("TEST 3: Intentional Car-to-Car Collisions...");
   // Ram Driver 1 into Driver 2
   const [carA, carB] = [...room.race.cars.values()];
-  carA.b.position.set(120, 0.55, 60);
-  carA.yaw = 0;
-  carA.b.velocity.set(0, 0, 45);
-  carB.b.position.set(120, 0.55, 64);
-  carB.yaw = Math.PI;
-  carB.b.velocity.set(0, 0, -45);
+  for (const [car, s, reverse] of [
+    [carA, 60, false],
+    [carB, 64, true],
+  ]) {
+    const p = room.race.track.point(s);
+    car.b.position.set(p.x, 0.55, p.z);
+    car.yaw = p.yaw + (reverse ? Math.PI : 0);
+    car.b.quaternion.setFromEuler(0, car.yaw, 0);
+    car.b.velocity.set(Math.sin(car.yaw) * 45, 0, Math.cos(car.yaw) * 45);
+    car.previous = { x: p.x, z: p.z };
+  }
 
   for (let i = 0; i < 30; i++) {
     room.race.step(1 / 60, Date.now(), true, room.startAt);

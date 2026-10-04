@@ -26,6 +26,8 @@
           aria-controls="audioPanel"
         >
           MIXER</button
+        ><button id="camera" class="small" title="Switch camera (C)">
+          VIEW CHASE · C</button
         ><button id="quality" class="small">QUALITY MEDIUM</button>
       </div>
     </header>
@@ -77,14 +79,15 @@
         <p class="micro">No account. No downloads. Just drive.</p>
       </section>
       <div class="specs">
-        <span>01 <b>PALM CIRCUIT</b></span
-        ><span>02—06 <b>DRIVERS</b></span
+        <span>04 <b>CIRCUITS</b></span
+        ><span>01—06 <b>DRIVERS</b></span
         ><span>03 <b>LAPS</b></span>
       </div>
     </main>
     <section id="lobby" class="overlay panel" hidden>
       <div class="eyebrow">THE PADDOCK</div>
       <h2>Your grid is waiting.</h2>
+      <p id="lobbyTrack" class="micro">Palm Circuit</p>
       <label>PRIVATE ROOM CODE</label>
       <div class="room-code" id="roomCode"></div>
       <button id="copy">COPY INVITE LINK ↗</button>
@@ -123,7 +126,7 @@
     </section>
     <footer>
       <span class="live-dot"></span>
-      <span>PALM CIRCUIT <b> / </b> COASTAL CLUB</span>
+      <span id="trackName">PALM CIRCUIT</span>
       <details>
         <summary>HOW TO DRIVE</summary>
         <p>
@@ -131,8 +134,9 @@
             >A ← 4</kbd
           >
           <kbd>D → 6</kbd> Steer · <kbd>SPACE / 0</kbd> Drift ·
-          <kbd>R</kbd> Reset<br />Follow the arrows. Pass the glowing checkpoint
-          gates in order.<br />Cars make contact. Leave room when overtaking.
+          <kbd>R</kbd> Reset · <kbd>C</kbd> Camera<br />Follow the arrows. Pass
+          the glowing checkpoint gates in order.<br />Cars make contact. Leave
+          room when overtaking.
         </p>
       </details>
     </footer>

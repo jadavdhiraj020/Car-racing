@@ -4,7 +4,7 @@ import "@fontsource/dm-sans/latin-600.css";
 import "./style.css";
 import { io } from "socket.io-client";
 import { createScene } from "./scene.js";
-import { TRACK, LENGTH, point, nearest } from "../../shared/track.js";
+import { getTrack } from "../../shared/track.js";
 import { validSnapshot } from "../../shared/protocol.js";
 
 const $ = (id) => document.getElementById(id),
@@ -13,8 +13,16 @@ const $ = (id) => document.getElementById(id),
   inputSources = new Map(),
   map = $("minimap").getContext("2d");
 
-const toCX = (x) => 95 + (x + 20) * 0.23;
-const toCY = (z) => 100 - (z - 5) * 0.23;
+let track = getTrack(),
+  TRACK = track,
+  LENGTH = track.length,
+  point = track.point,
+  nearest = track.nearest,
+  mapCenterX = 0,
+  mapCenterZ = 0,
+  mapScale = 1;
+const toCX = (x) => 90 + (x - mapCenterX) * mapScale;
+const toCY = (z) => 100 - (z - mapCenterZ) * mapScale;
 
 // Pre-render static minimap background once to prevent 3200 binary searches/sec
 const mapBg = document.createElement("canvas");
@@ -22,29 +30,35 @@ mapBg.width = 180;
 mapBg.height = 200;
 const bgCtx = mapBg.getContext("2d");
 
-bgCtx.beginPath();
-for (let i = 0; i <= 160; i++) {
-  const p = point((i * LENGTH) / 160);
-  if (i === 0) bgCtx.moveTo(toCX(p.x), toCY(p.z));
-  else bgCtx.lineTo(toCX(p.x), toCY(p.z));
+function rebuildMinimap() {
+  const { minX, maxX, minZ, maxZ } = track.bounds;
+  mapCenterX = (minX + maxX) / 2;
+  mapCenterZ = (minZ + maxZ) / 2;
+  mapScale = Math.min(150 / (maxX - minX), 170 / (maxZ - minZ));
+  bgCtx.clearRect(0, 0, 180, 200);
+  bgCtx.beginPath();
+  for (let i = 0; i <= 160; i++) {
+    const p = point((i * LENGTH) / 160);
+    if (i === 0) bgCtx.moveTo(toCX(p.x), toCY(p.z));
+    else bgCtx.lineTo(toCX(p.x), toCY(p.z));
+  }
+  bgCtx.closePath();
+  bgCtx.strokeStyle = "#b1c4a444";
+  bgCtx.lineWidth = Math.max(7, track.width * mapScale + 3);
+  bgCtx.stroke();
+  bgCtx.strokeStyle = "#d6fc71aa";
+  bgCtx.lineWidth = 3;
+  bgCtx.stroke();
+  const f0 = point(0, -track.width / 2),
+    f1 = point(0, track.width / 2);
+  bgCtx.beginPath();
+  bgCtx.moveTo(toCX(f0.x), toCY(f0.z));
+  bgCtx.lineTo(toCX(f1.x), toCY(f1.z));
+  bgCtx.strokeStyle = "#ffffff";
+  bgCtx.lineWidth = 2.5;
+  bgCtx.stroke();
 }
-bgCtx.closePath();
-bgCtx.strokeStyle = "#b1c4a444";
-bgCtx.lineWidth = 14;
-bgCtx.stroke();
-
-bgCtx.strokeStyle = "#d6fc71aa";
-bgCtx.lineWidth = 3;
-bgCtx.stroke();
-
-const f0 = point(0, -11),
-  f1 = point(0, 11);
-bgCtx.beginPath();
-bgCtx.moveTo(toCX(f0.x), toCY(f0.z));
-bgCtx.lineTo(toCX(f1.x), toCY(f1.z));
-bgCtx.strokeStyle = "#ffffff";
-bgCtx.lineWidth = 2.5;
-bgCtx.stroke();
+rebuildMinimap();
 
 let view,
   state,
@@ -54,7 +68,9 @@ let view,
   lastCountdown = "",
   lastPhase = "",
   lastGantryStep = -1,
-  quality = 1;
+  quality = 1,
+  cameraIndex = 0;
+const cameraModes = ["chase", "cockpit", "overhead"];
 
 window.__getState = () => (state ? structuredClone(state) : null);
 window.__getKeys = () => ({ ...keys });
@@ -119,7 +135,7 @@ function notice(text) {
 }
 
 try {
-  view = createScene($("game"), engineAudio);
+  view = createScene($("game"), engineAudio, track);
 } catch (e) {
   notice(
     "3D could not start. Enable browser hardware acceleration and reload.",
@@ -153,6 +169,9 @@ $("audioSettings").onclick = () => {
   $("audioSettings").setAttribute("aria-expanded", String(open));
 };
 for (const name of ["Master", "Engine", "Music", "Sfx"]) {
+  const initial = Math.round(engineAudio.volumes[name.toLowerCase()] * 100);
+  $("volume" + name).value = initial;
+  $("value" + name).textContent = initial + "%";
   $("volume" + name).oninput = () => {
     const value = Number($("volume" + name).value);
     $("value" + name).textContent = value + "%";
@@ -172,6 +191,39 @@ $("quality").onclick = () => {
   $("quality").textContent =
     "QUALITY " + ["LOW", "MEDIUM", "HIGH", "ULTRA"][quality];
 };
+
+function cycleCamera() {
+  cameraIndex = (cameraIndex + 1) % cameraModes.length;
+  const mode = cameraModes[cameraIndex];
+  view?.camera(mode);
+  $("camera").textContent = "VIEW " + mode.toUpperCase() + " · C";
+}
+$("camera").onclick = cycleCamera;
+
+function selectTrack(id) {
+  const next = getTrack(id);
+  if (next.id === track.id && view) return;
+  view?.dispose();
+  view = null;
+  track = next;
+  TRACK = track;
+  LENGTH = track.length;
+  point = track.point;
+  nearest = track.nearest;
+  rebuildMinimap();
+  clearControls();
+  inputHistory = [];
+  lastMap = 0;
+  try {
+    view = createScene($("game"), engineAudio, track);
+    view.quality(quality);
+    view.camera(cameraModes[cameraIndex]);
+    view.network(offset, networkRtt, networkJitter);
+  } catch (error) {
+    notice("Circuit could not load. Reload to reconnect to your room.");
+    console.error(error);
+  }
+}
 
 const invite = new URLSearchParams(location.search).get("room");
 if (invite) $("code").value = invite.toUpperCase().slice(0, 5);
@@ -388,6 +440,8 @@ function render() {
   if (!state) return;
 
   const host = state.host === socket.id;
+  setText("trackName", track.name.toUpperCase());
+  setText("lobbyTrack", track.name + " · " + Math.round(LENGTH) + " m");
   const reconnecting = new Set(state.reconnecting || []);
   $("roomCode").textContent = state.code;
   setHtml(
@@ -465,6 +519,7 @@ socket.on("state", (s) => {
   if (!validSnapshot(s) || (state?.code === s.code && s.seq <= state.seq))
     return;
   engineAudio.setPhase(s.phase);
+  selectTrack(s.trackId);
   state = s;
   if (!clockKnown) {
     offset = s.serverNow - Date.now();
@@ -502,7 +557,12 @@ socket.on("state", (s) => {
     lastPhase = s.phase;
   }
   sendInput();
-  const signature = s.phase + s.host + s.players.map((p) => p.id).join(",");
+  const signature =
+    s.phase +
+    s.host +
+    s.trackId +
+    s.reconnecting.join(",") +
+    s.players.map((p) => p.id).join(",");
   if (signature !== uiSignature || performance.now() - lastRender > 100) {
     render();
     lastRender = performance.now();
@@ -578,6 +638,11 @@ function clearControls() {
 
 window.addEventListener("keydown", (e) => {
   if (e.target instanceof HTMLInputElement) return;
+  if (e.code === "KeyC" && !e.repeat) {
+    e.preventDefault();
+    cycleCamera();
+    return;
+  }
   const key = resolveKey(e);
   if (key && state) {
     e.preventDefault();
@@ -732,7 +797,9 @@ function frame() {
     const safeX = Number.isFinite(c.x) ? c.x : 0;
     const safeZ = Number.isFinite(c.z) ? c.z : 0;
     const distFromCenter = nearest(safeX, safeZ).distance;
-    const onKerb = distFromCenter >= 9.8 && distFromCenter <= 11.6;
+    const onKerb =
+      distFromCenter >= TRACK.width / 2 - 1.2 &&
+      distFromCenter <= TRACK.width / 2 + 0.6;
     try {
       engineAudio.update(
         Number.isFinite(c.speed) ? c.speed : 0,
@@ -744,7 +811,14 @@ function frame() {
         onKerb,
       );
 
-      if (sound) engineAudio.impact(Number.isFinite(c.impact) ? c.impact : 0);
+      if (sound)
+        engineAudio.impact(
+          state.phase === "racing" &&
+            c.finished === null &&
+            Number.isFinite(c.impact)
+            ? c.impact
+            : 0,
+        );
     } catch {}
 
     setText(

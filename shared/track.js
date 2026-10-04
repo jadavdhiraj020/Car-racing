@@ -1,199 +1,183 @@
-export const TRACK = {
-  name: "Palm Circuit",
-  width: 22,
-  laps: 3,
-  maxPlayers: 6,
-  segments: 180,
-};
-
-// Grand Prix style flowing elliptical circuit:
-// Long main straight, high-speed sweeping North & South carousels,
-// gentle flowing left/right transitions, wide run-offs, and no sudden sharp kinks.
-const knots = [
-  { x: 120, z: -140 }, // [0] Final bend exit onto main straight
-  { x: 120, z: 0 }, // [1] Start / Finish line (s = 0, yaw = 0)
-  { x: 120, z: 120 }, // [2] Main straight mid
-  { x: 120, z: 210 }, // [3] Main straight braking zone
-  { x: 92, z: 290 }, // [4] Turn 1: sweeping left-into-turn entry
-  { x: 20, z: 340 }, // [5] Turn 2: North sweeper apex (large radius)
-  { x: -65, z: 335 }, // [6] Turn 2: North sweeper exit
-  { x: -135, z: 270 }, // [7] Turn 3: High speed sweep to back stretch
-  { x: -150, z: 160 }, // [8] Back stretch entry
-  { x: -110, z: 45 }, // [9] Gentle flowing right bend
-  { x: -95, z: -55 }, // [10] Apex of gentle right sweeper
-  { x: -135, z: -155 }, // [11] Sweeping left transition
-  { x: -160, z: -230 }, // [12] South sweeper entry
-  { x: -105, z: -320 }, // [13] South carousel apex (large radius)
-  { x: 5, z: -330 }, // [14] South curve exit
-  { x: 95, z: -255 }, // [15] Final wide bend entry
+// Each room owns a circuit; there is no mutable global active-track state.
+const definitions = [
+  { id: "palm", name: "Palm Grand Prix", rx: 120, rz: 330, sway: 0, width: 24 },
+  { id: "azure", name: "Azure Coast", rx: 165, rz: 300, sway: 18, width: 25 },
+  { id: "ember", name: "Ember Valley", rx: 145, rz: 380, sway: -16, width: 26 },
+  {
+    id: "aurora",
+    name: "Aurora Speedway",
+    rx: 195,
+    rz: 260,
+    sway: 12,
+    width: 26,
+  },
 ];
-
-const N = knots.length;
-
-function getRawPoint(t) {
-  t = ((t % N) + N) % N;
-  const i = Math.floor(t);
-  const u = t - i;
-  const p0 = knots[(i - 1 + N) % N];
-  const p1 = knots[i];
-  const p2 = knots[(i + 1) % N];
-  const p3 = knots[(i + 2) % N];
-  const u2 = u * u;
-  const u3 = u2 * u;
-
-  const x =
-    0.5 *
-    (2 * p1.x +
-      (-p0.x + p2.x) * u +
-      (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * u2 +
-      (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * u3);
-
-  const z =
-    0.5 *
-    (2 * p1.z +
-      (-p0.z + p2.z) * u +
-      (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * u2 +
-      (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * u3);
-
-  const dx =
-    0.5 *
-    (-p0.x +
-      p2.x +
-      2 * (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * u +
-      3 * (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * u2);
-
-  const dz =
-    0.5 *
-    (-p0.z +
-      p2.z +
-      2 * (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * u +
-      3 * (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * u2);
-
-  const yaw = Math.atan2(dx, dz);
-  return { x, z, yaw };
-}
-
-// Pre-sample finely starting from t = 1 (where x = 120, z = 0, yaw = 0)
-const SAMPLES = 2000;
-const rawSamples = [];
-for (let i = 0; i <= SAMPLES; i++) {
-  const t = 1 + (i * N) / SAMPLES;
-  rawSamples.push(getRawPoint(t));
-}
-
-const rawLengths = [0];
-for (let i = 1; i < rawSamples.length; i++) {
-  rawLengths.push(
-    rawLengths[i - 1] +
-      Math.hypot(
-        rawSamples[i].x - rawSamples[i - 1].x,
-        rawSamples[i].z - rawSamples[i - 1].z,
-      ),
-  );
-}
-const TOTAL_LENGTH = rawLengths.at(-1);
-
-// Generate uniform arc-length equidistant lookup samples
-const UNIFORM_COUNT = 1600;
-const samples = [];
-for (let i = 0; i <= UNIFORM_COUNT; i++) {
-  const targetS = (i * TOTAL_LENGTH) / UNIFORM_COUNT;
-  let lo = 0,
-    hi = rawLengths.length - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (rawLengths[mid] <= targetS) lo = mid;
-    else hi = mid;
+function buildTrack(config) {
+  const { rx, rz, sway } = config;
+  // Analytic closed curves have continuous tangents and curvature at the seam.
+  // Gentle lateral shaping creates distinct flowing ovals without angular turns.
+  function getRawPoint(t) {
+    const x = rx * Math.cos(t) + sway * (Math.cos(2 * t) - 1);
+    const z = rz * Math.sin(t);
+    const dx = -rx * Math.sin(t) - 2 * sway * Math.sin(2 * t);
+    const dz = rz * Math.cos(t);
+    return { x, z, yaw: Math.atan2(dx, dz) };
   }
-  const a = rawSamples[lo],
-    b = rawSamples[hi];
-  const t = (targetS - rawLengths[lo]) / (rawLengths[hi] - rawLengths[lo] || 1);
-  const delta = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw));
-  samples.push({
-    x: a.x + (b.x - a.x) * t,
-    z: a.z + (b.z - a.z) * t,
-    yaw: a.yaw + delta * t,
-  });
-}
-
-const lengths = [0];
-for (let i = 1; i < samples.length; i++) {
-  lengths.push(
-    lengths[i - 1] +
-      Math.hypot(
-        samples[i].x - samples[i - 1].x,
-        samples[i].z - samples[i - 1].z,
-      ),
-  );
-}
-
-export const LENGTH = lengths.at(-1);
-
-export function point(s, offset = 0) {
-  s = ((s % LENGTH) + LENGTH) % LENGTH;
-  let lo = 0,
-    hi = lengths.length - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (lengths[mid] <= s) lo = mid;
-    else hi = mid;
+  // Arc-length lookup keeps geometry, checkpoints and barrier spacing consistent.
+  const SAMPLES = 2000;
+  const rawSamples = [];
+  for (let i = 0; i <= SAMPLES; i++) {
+    const t = (i * Math.PI * 2) / SAMPLES;
+    rawSamples.push(getRawPoint(t));
   }
-  const a = samples[lo],
-    b = samples[hi],
-    t = (s - lengths[lo]) / (lengths[hi] - lengths[lo] || 1);
-  const delta = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw)),
-    yaw = a.yaw + delta * t;
-  return {
-    x: a.x + (b.x - a.x) * t + Math.cos(yaw) * offset,
-    z: a.z + (b.z - a.z) * t - Math.sin(yaw) * offset,
-    yaw,
-  };
-}
 
-// Exact spatial rejection: skip segment blocks whose bounds cannot beat the best hit.
-const blocks = [];
-for (let start = 0; start < samples.length - 1; start += 24) {
-  const end = Math.min(samples.length - 1, start + 24);
-  let minX = Infinity,
-    maxX = -Infinity,
-    minZ = Infinity,
-    maxZ = -Infinity;
-  for (let i = start; i <= end; i++) {
-    const p = samples[i];
-    minX = Math.min(minX, p.x);
-    maxX = Math.max(maxX, p.x);
-    minZ = Math.min(minZ, p.z);
-    maxZ = Math.max(maxZ, p.z);
+  const rawLengths = [0];
+  for (let i = 1; i < rawSamples.length; i++) {
+    rawLengths.push(
+      rawLengths[i - 1] +
+        Math.hypot(
+          rawSamples[i].x - rawSamples[i - 1].x,
+          rawSamples[i].z - rawSamples[i - 1].z,
+        ),
+    );
   }
-  blocks.push({ start, end, minX, maxX, minZ, maxZ });
-}
-export function nearest(x, z) {
-  let best = Infinity,
-    s = 0;
-  for (const block of blocks) {
-    const bx = Math.max(block.minX - x, 0, x - block.maxX),
-      bz = Math.max(block.minZ - z, 0, z - block.maxZ);
-    if (bx * bx + bz * bz > best) continue;
-    for (let i = block.start; i < block.end; i++) {
-      const a = samples[i],
-        b = samples[i + 1],
-        dx = b.x - a.x,
-        dz = b.z - a.z;
-      const lenSq = dx * dx + dz * dz;
-      const t =
-        lenSq > 0
-          ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / lenSq))
-          : 0;
-      const distance = (x - a.x - dx * t) ** 2 + (z - a.z - dz * t) ** 2;
-      if (distance < best) {
-        best = distance;
-        s = lengths[i] + t * (lengths[i + 1] - lengths[i]);
+  const TOTAL_LENGTH = rawLengths.at(-1);
+
+  // Generate uniform arc-length equidistant lookup samples
+  const UNIFORM_COUNT = 1600;
+  const samples = [];
+  for (let i = 0; i <= UNIFORM_COUNT; i++) {
+    const targetS = (i * TOTAL_LENGTH) / UNIFORM_COUNT;
+    let lo = 0,
+      hi = rawLengths.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (rawLengths[mid] <= targetS) lo = mid;
+      else hi = mid;
+    }
+    const a = rawSamples[lo],
+      b = rawSamples[hi];
+    const t =
+      (targetS - rawLengths[lo]) / (rawLengths[hi] - rawLengths[lo] || 1);
+    const delta = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw));
+    samples.push({
+      x: a.x + (b.x - a.x) * t,
+      z: a.z + (b.z - a.z) * t,
+      yaw: a.yaw + delta * t,
+    });
+  }
+
+  const lengths = [0];
+  for (let i = 1; i < samples.length; i++) {
+    lengths.push(
+      lengths[i - 1] +
+        Math.hypot(
+          samples[i].x - samples[i - 1].x,
+          samples[i].z - samples[i - 1].z,
+        ),
+    );
+  }
+
+  const LENGTH = lengths.at(-1);
+
+  function point(s, offset = 0) {
+    s = ((s % LENGTH) + LENGTH) % LENGTH;
+    let lo = 0,
+      hi = lengths.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (lengths[mid] <= s) lo = mid;
+      else hi = mid;
+    }
+    const a = samples[lo],
+      b = samples[hi],
+      t = (s - lengths[lo]) / (lengths[hi] - lengths[lo] || 1);
+    const delta = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw)),
+      yaw = a.yaw + delta * t;
+    return {
+      x: a.x + (b.x - a.x) * t + Math.cos(yaw) * offset,
+      z: a.z + (b.z - a.z) * t - Math.sin(yaw) * offset,
+      yaw,
+    };
+  }
+
+  // Exact spatial rejection: skip segment blocks whose bounds cannot beat the best hit.
+  const blocks = [];
+  for (let start = 0; start < samples.length - 1; start += 24) {
+    const end = Math.min(samples.length - 1, start + 24);
+    let minX = Infinity,
+      maxX = -Infinity,
+      minZ = Infinity,
+      maxZ = -Infinity;
+    for (let i = start; i <= end; i++) {
+      const p = samples[i];
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minZ = Math.min(minZ, p.z);
+      maxZ = Math.max(maxZ, p.z);
+    }
+    blocks.push({ start, end, minX, maxX, minZ, maxZ });
+  }
+  function nearest(x, z) {
+    let best = Infinity,
+      s = 0;
+    for (const block of blocks) {
+      const bx = Math.max(block.minX - x, 0, x - block.maxX),
+        bz = Math.max(block.minZ - z, 0, z - block.maxZ);
+      if (bx * bx + bz * bz > best) continue;
+      for (let i = block.start; i < block.end; i++) {
+        const a = samples[i],
+          b = samples[i + 1],
+          dx = b.x - a.x,
+          dz = b.z - a.z;
+        const lenSq = dx * dx + dz * dz;
+        const t =
+          lenSq > 0
+            ? Math.max(
+                0,
+                Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / lenSq),
+              )
+            : 0;
+        const distance = (x - a.x - dx * t) ** 2 + (z - a.z - dz * t) ** 2;
+        if (distance < best) {
+          best = distance;
+          s = lengths[i] + t * (lengths[i + 1] - lengths[i]);
+        }
       }
     }
+    return { s: s % LENGTH, distance: Math.sqrt(best) };
   }
-  return { s: s % LENGTH, distance: Math.sqrt(best) };
-}
 
-export const gates = Array.from({ length: 24 }, (_, i) =>
-  point((i * LENGTH) / 24),
-);
+  const gates = Array.from({ length: 24 }, (_, i) => point((i * LENGTH) / 24));
+
+  const padding = config.width / 2 + 15;
+  const bounds = Object.freeze({
+    minX: Math.min(...samples.map((p) => p.x)) - padding,
+    maxX: Math.max(...samples.map((p) => p.x)) + padding,
+    minZ: Math.min(...samples.map((p) => p.z)) - padding,
+    maxZ: Math.max(...samples.map((p) => p.z)) + padding,
+  });
+  return Object.freeze({
+    id: config.id,
+    name: config.name,
+    width: config.width,
+    laps: 3,
+    maxPlayers: 6,
+    segments: 240,
+    length: LENGTH,
+    point,
+    nearest,
+    gates: Object.freeze(gates.map(Object.freeze)),
+    bounds,
+  });
+}
+export const TRACKS = Object.freeze(definitions.map(buildTrack));
+export function getTrack(id = "palm") {
+  return TRACKS.find((track) => track.id === id) || TRACKS[0];
+}
+// Compatibility exports are permanently bound to the default circuit.
+export const TRACK = TRACKS[0];
+export const LENGTH = TRACK.length;
+export const point = TRACK.point;
+export const nearest = TRACK.nearest;
+export const gates = TRACK.gates;

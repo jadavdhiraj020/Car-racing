@@ -1,7 +1,10 @@
+import { TRACKS } from "./track.js";
+const trackIds = new Set(TRACKS.map((track) => track.id));
 // Validate the complete snapshot at the network boundary, before UI/audio/3D see it.
 export function validSnapshot(s) {
   if (
     !s ||
+    !trackIds.has(s.trackId) ||
     !["lobby", "countdown", "racing", "results"].includes(s.phase) ||
     typeof s.code !== "string" ||
     !/^[A-Z2-9]{5}$/.test(s.code) ||

@@ -4,7 +4,7 @@ import { randomBytes, randomInt } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
 import { Race } from "./race.js";
-import { TRACK } from "../shared/track.js";
+import { TRACKS } from "../shared/track.js";
 export async function createGame({ dev = false } = {}) {
   const RECONNECT_GRACE_MS = 30000;
   const app = express(),
@@ -29,7 +29,12 @@ export async function createGame({ dev = false } = {}) {
     "#c999ff",
     "#ff9c45",
   ];
+  const selectTrack = (previous) => {
+    const choices = TRACKS.filter((track) => track.id !== previous);
+    return choices[randomInt(choices.length)].id;
+  };
   const state = (r) => ({
+    trackId: r.race.track.id,
     seq: (r.stateSeq = (r.stateSeq || 0) + 1),
     raceId: r.raceId || 0,
     code: r.code,
@@ -193,7 +198,7 @@ export async function createGame({ dev = false } = {}) {
           players: new Map(),
           tokens: new Map(),
           pending: new Map(),
-          race: new Race(),
+          race: new Race(selectTrack()),
           startAt: 0,
           endAt: 0,
         };
@@ -228,7 +233,7 @@ export async function createGame({ dev = false } = {}) {
       if (r.phase !== "lobby") throw Error("Race is already in progress.");
       if (r.pending.size)
         throw Error("Wait for reconnecting racers before starting.");
-      r.race = new Race();
+      r.race = new Race(r.race.track.id);
       r.raceId = (r.raceId || 0) + 1;
       [...r.players.keys()].forEach((id, i) => r.race.add(id, i));
       r.phase = "countdown";
@@ -243,7 +248,7 @@ export async function createGame({ dev = false } = {}) {
       r.phase = "lobby";
       r.startAt = 0;
       r.endAt = 0;
-      r.race = new Race();
+      r.race = new Race(selectTrack(r.race.track.id));
       [...r.players.keys()].forEach((id, i) => r.race.add(id, i));
       broadcast(r);
     });

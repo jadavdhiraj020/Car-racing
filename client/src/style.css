@@ -889,3 +889,48 @@ footer,
     top: 90px;
   }
 }
+
+/* The camera control stays reachable without crowding the race HUD. */
+.top-right {
+  gap: 8px;
+}
+@media (max-width: 900px) {
+  header {
+    padding: 16px 20px;
+  }
+  .brand small {
+    display: none;
+  }
+  .top-right {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 440px;
+  }
+}
+@media (max-width: 700px) {
+  header {
+    align-items: flex-start;
+    padding: 12px;
+  }
+  .top-right {
+    width: 62vw;
+    max-width: 290px;
+    gap: 5px;
+  }
+  .top-right .small {
+    padding: 7px 8px;
+    font-size: 9px;
+  }
+  .hud-top {
+    top: 124px;
+  }
+  .audio-panel {
+    top: 124px;
+  }
+}
+
+@media (max-width: 700px) {
+  #leaderboard {
+    top: 205px;
+  }
+}

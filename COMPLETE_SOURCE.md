@@ -79,7 +79,7 @@ A complete racing project for solo testing or friends: Babylon.js graphics, an a
 
 | Part            | Choice                      | Purpose                                                          |
 | --------------- | --------------------------- | ---------------------------------------------------------------- |
-| 3D              | Babylon.js 8                | PBR race cars, flowing circuit, environment and chase camera     |
+| 3D              | Babylon.js 8                | PBR race cars, four circuits and three camera views              |
 | Physics         | cannon-es 0.20 (MIT)        | Server-side ground, barrier and car contacts                     |
 | Multiplayer     | Socket.IO 4                 | Sequenced controls; 30 Hz racing snapshots, 2 Hz lobby snapshots |
 | Server          | Node.js 24, Express 5       | Serves the website and runs each race                            |
@@ -94,6 +94,8 @@ The client sends six boolean controls and an input sequence; it cannot submit po
 The browser uses a shared steering controller for fixed-step local prediction, acknowledges input sequences, and reconciles server corrections. Key presses and releases use reliable Socket.IO delivery; unchanged periodic input updates may be dropped under congestion. High-rate race snapshots may also be dropped under congestion, with reliable keyframes about every 233 ms. Opponents interpolate on a shared synchronized timeline with a bounded jitter buffer, limited extrapolation, and speed-limited visual catch-up after missing snapshots. Prediction yields to authoritative contacts near other cars and barriers, with a short visual handoff to avoid a visible snap. Sequenced snapshots are validated before reaching rendering, HUD or audio. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels that avoid HUD panels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
 
 An interrupted connection keeps that driver's seat, car and race progress for up to 30 seconds. The same browser tab stores a temporary seat token and automatically reclaims the seat when its connection returns or the page is refreshed. Controls are released while disconnected; an active driver becomes host if needed. If the grace period expires, the driver is removed and empty rooms are deleted. New drivers still cannot join an active race. A host can rematch after results to reopen the lobby. Restarts and deploys erase all rooms and seat tokens.
+
+Four wide, smoothly curved circuits share one geometry definition across road rendering, barriers, driving prediction, checkpoint rules and minimap: Palm Grand Prix, Azure Coast, Ember Valley and Aurora Speedway. The server randomly selects a circuit when a room is created and chooses a different circuit on rematch. The lobby shows the upcoming circuit. Tracks remain flat to keep rendered surfaces and authoritative contact physics aligned.
 
 ## Project structure / important files
 
@@ -195,11 +197,11 @@ To test multiplayer with two windows:
 5. Click the game area if needed. Hold W to accelerate; use A/D to steer. In the other window watch the first car move. Use R if stuck. If a window loses focus, controls release automatically.
 6. Follow the loop and glowing gate posts for three laps. Each finish registers on the server. After both finish (or the timeout), the host clicks **RUN IT BACK ↻**, then starts again.
 
-Controls: W/Up accelerate; S/Down brake then reverse; A/Left and D/Right steer; Space drift; R reset. Touch buttons appear on devices with coarse pointers. Multiple keys or fingers holding one control remain active until the last is released. Losing focus releases all driving controls.
+Controls: W/Up accelerate; S/Down brake then reverse; A/Left and D/Right steer; Space drift; R reset; C cycle chase, cockpit and overhead cameras. The **VIEW** button also switches cameras. Touch buttons appear on devices with coarse pointers. Multiple keys or fingers holding one control remain active until the last is released. Losing focus releases all driving controls.
 
 Sound is opt-in using **SOUND OFF**. **MIXER** independently adjusts Master, Engine, Music and SFX. The original 64 BPM Japanese-inspired ambient score uses synthesized plucked, flute-like, piano-like and pad tones; music becomes quieter during racing. Engine pitch/load, shifts, tire/kerb sounds, wind and spatial opponents remain dynamic. Muting or hiding the page cancels transient sounds and music scheduling; resuming avoids replaying old cues. No recordings or commercial melodies are bundled.
 
-Graphics defaults to Medium; the button cycles through High, Ultra, Low and Medium. Tiers adjust resolution and shadows, with bounded adaptive resolution responding to frame times. Ultra starts above native resolution and costs more GPU time. The existing WebGL renderer is retained and validated with WebGL2; WebGPU was not introduced. The chase camera damps position and aim, and wheel/body motion follows speed, steering and load.
+Graphics defaults to Medium; the button cycles through High, Ultra, Low and Medium. Tiers adjust resolution and shadows, with bounded adaptive resolution responding to frame times. Ultra starts above native resolution and costs more GPU time. The existing WebGL renderer is retained and validated with WebGL2; WebGPU was not introduced. Three cameras provide a damped chase view, driver viewpoint and elevated overhead view. Wheel/body motion follows speed, steering and load.
 
 Testing over your home Wi-Fi requires the PC's LAN address, not localhost. Run `ipconfig`, find the active Wi-Fi adapter's IPv4 address, and open `http://THAT-ADDRESS:3000` on the other device. If Windows asks, allow Node on your trusted private network. The easiest test between different homes is the deployed HTTPS URL below; do not forward router ports.
 
@@ -679,6 +681,17 @@ For manual multiplayer verification, create/join a room in two independent brows
 - An inline probe added 24 ms of CPU work to each physics step for a solo race. Before the cap, the last sampled simulation timestamp lagged wall time by 371 ms after 2.5 seconds (438 ms maximum). With the accumulator capped to five steps, the same probe ended at 24 ms lag (91 ms maximum). No test file was created. This bound prevents a stale queue; it cannot maintain full-speed physics or low browser latency when the server CPU is overloaded.
 - All eight Node tests, the production build, a native-GPU two-browser smoke run, all seven crash/contact/rejoin stress scenarios, and five consecutive race/rematch cycles passed after the change. No new test files were created.
 
+## 2026-10-04 circuits, cameras, cars and audio overhaul
+
+- Added four server-selected circuits with continuous elliptical curves: Palm Grand Prix, Azure Coast, Ember Valley and Aurora Speedway (1,439–1,738 m long, 24–26 m wide). Every Race owns its track; rendering, barriers, prediction, reset, checkpoint order, progress and minimap use that same definition. Room creation chooses randomly, rematch excludes the previous circuit, and START retains the lobby circuit. Tracks remain flat so the road and physical ground agree.
+- The seven tests in the existing test file passed, including physically driving three full laps on every circuit, seam/curvature and nearest-point checks, skipped/backward checkpoint rejection, contacts, barriers, safe reset and Socket.IO circuit synchronization. The former two geometry tests were combined into one broader all-circuit check; no test files were created. The full run took 190.7 seconds under concurrent builds/browser work.
+- Added chase, open cockpit and overhead camera modes through the VIEW button and C key. Cars now have narrower open-wheel monocoques, tapered sidepods, exposed suspension, curved halos and animated steering wheels. Circuit labels, roads, gates, start gantry and paddock placements follow each circuit.
+- The production two-client Chrome integration pass exercised every circuit and all three camera modes, keyboard camera switching, movement, reset, results and rematch. A guest refresh preserved its exact server car and selected circuit. Mixer defaults, sound toggles and a simulated visibility transition passed. No page errors or failed render frames occurred. Each two-car scene retained 270 meshes, 53 materials and 16 textures through repeated circuit recreation at this stage; race finishing in this browser lifecycle check used server-side finish fixtures, while the server tests physically drove all laps.
+- Replaced the heavily distorted sawtooth engine stack with restrained finite harmonics, smoother RPM/load/shift/limiter envelopes and quieter whistle, exhaust and tire/kerb effects. At maximum engine/master sliders, the offline redline comparison reduced peak amplitude from .464 to .221 and energy above 4 kHz from 19.25% to .028%. A combined engine/music/effects/five-rival stress mix peaked at .861 without clipping. Three audio suspend/resume/results/lobby cycles and disposal/reinitialization had no page errors; final module teardown left zero nodes and sources. These are objective signal/lifecycle checks, not a subjective listening rating.
+- The integrated screenshot-heavy two-client run ranged from about 24 to 53 ms mean frame intervals. A separate settled Medium profile measured about 35 ms per client; another Medium-to-Low comparison measured 32.3 / 28.8 ms at Medium and 24.3 / 24.5 ms after nine seconds at Low. Browser startup, screenshots and machine load vary between these short runs; this machine did not hold locked 60 FPS with two clients.
+- The rendering follow-up batches fixed paddock/gantry geometry, freezes static world matrices, disables unused pointer picking and uses a 512-pixel shadow map at Medium (High/Ultra retain 1024). A final settled two-client Medium profile measured 23.7 / 23.2 ms mean and 29.9 / 29.5 ms p95, with 103 draw calls and 262 meshes per client. The earlier profile had 111 draws and 270 meshes. Circuit choice and machine load differed between runs, so this is an observed final result, not a controlled frame-rate improvement claim.
+- After the rendering follow-up, all four circuits passed another production two-client camera/results/rematch check, followed by the solo start/results/rematch path. The final cockpit eye-height correction was checked in a production browser and screenshot to keep the halo clear of the road. The production build, existing two-browser smoke check, all seven crash/contact/rejoin scenarios and five consecutive race/rematch cycles passed, with zero browser page errors. The crash fixture now positions cars using the selected circuit rather than coordinates from the former single map.
+
 ## NOT TESTED and practical limits
 
 - Public deployment: NOT TESTED. No deployed URL was available. Render configuration, health route and same-origin networking remain intact; a Git push does not prove that a public deployment succeeded.
@@ -723,6 +736,8 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/index.html`
           aria-controls="audioPanel"
         >
           MIXER</button
+        ><button id="camera" class="small" title="Switch camera (C)">
+          VIEW CHASE · C</button
         ><button id="quality" class="small">QUALITY MEDIUM</button>
       </div>
     </header>
@@ -774,14 +789,15 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/index.html`
         <p class="micro">No account. No downloads. Just drive.</p>
       </section>
       <div class="specs">
-        <span>01 <b>PALM CIRCUIT</b></span
-        ><span>02—06 <b>DRIVERS</b></span
+        <span>04 <b>CIRCUITS</b></span
+        ><span>01—06 <b>DRIVERS</b></span
         ><span>03 <b>LAPS</b></span>
       </div>
     </main>
     <section id="lobby" class="overlay panel" hidden>
       <div class="eyebrow">THE PADDOCK</div>
       <h2>Your grid is waiting.</h2>
+      <p id="lobbyTrack" class="micro">Palm Circuit</p>
       <label>PRIVATE ROOM CODE</label>
       <div class="room-code" id="roomCode"></div>
       <button id="copy">COPY INVITE LINK ↗</button>
@@ -820,7 +836,7 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/index.html`
     </section>
     <footer>
       <span class="live-dot"></span>
-      <span>PALM CIRCUIT <b> / </b> COASTAL CLUB</span>
+      <span id="trackName">PALM CIRCUIT</span>
       <details>
         <summary>HOW TO DRIVE</summary>
         <p>
@@ -828,8 +844,9 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/index.html`
             >A ← 4</kbd
           >
           <kbd>D → 6</kbd> Steer · <kbd>SPACE / 0</kbd> Drift ·
-          <kbd>R</kbd> Reset<br />Follow the arrows. Pass the glowing checkpoint
-          gates in order.<br />Cars make contact. Leave room when overtaking.
+          <kbd>R</kbd> Reset · <kbd>C</kbd> Camera<br />Follow the arrows. Pass
+          the glowing checkpoint gates in order.<br />Cars make contact. Leave
+          room when overtaking.
         </p>
       </details>
     </footer>
@@ -850,7 +867,7 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/client/src/audio.js
 
 ```
 import { AmbientMusic } from "./music.js";
-// Professional Web Audio API Procedural F1 Racing Audio Synthesizer
+// Procedural racing audio with restrained harmonics and smooth load response.
 // Pure procedural synthesis - zero external audio assets required
 
 export class EngineAudio {
@@ -859,7 +876,7 @@ export class EngineAudio {
     this.nodes = new Set();
     this.sources = new Set();
     this.timers = new Set();
-    this.volumes = { master: 0.8, engine: 0.8, music: 0.22, sfx: 0.7 };
+    this.volumes = { master: 0.72, engine: 0.68, music: 0.22, sfx: 0.65 };
     this.phase = "home";
     this.suspended = false;
     this.output = null;
@@ -904,12 +921,15 @@ export class EngineAudio {
     this.previous = performance.now();
     this.shiftUntil = 0;
     this.shiftType = "";
+    this.nextShift = 0;
     this.enabled = false;
     this.lastImpact = 0;
     this.lastPop = 0;
     this.lastThrottle = false;
     this.remoteCars = new Map();
     this.nextListenerUpdate = 0;
+    this.nextEngineUpdate = 0;
+    this.load = 0;
   }
 
   track(node) {
@@ -965,6 +985,10 @@ export class EngineAudio {
     this.gear = 1;
     this.rpm = this.idleRpm;
     this.boost = 0;
+    this.load = 0;
+    this.lastThrottle = false;
+    this.nextShift = 0;
+    this.nextEngineUpdate = 0;
     this.impactLevel = 0;
     for (const id of [...this.remoteCars.keys()]) this.removeRemoteCar(id);
     this.applyMix();
@@ -1057,12 +1081,14 @@ export class EngineAudio {
     const ctx = new AC();
     this.ctx = ctx;
     this.nextListenerUpdate = 0;
+    this.nextEngineUpdate = 0;
+    this.previous = performance.now();
 
-    // Master bus with multiband limiting
+    // Shared compressor catches overlapping effects; synthesis keeps headroom.
     const limiter = this.track(ctx.createDynamicsCompressor());
-    limiter.threshold.value = -12;
-    limiter.knee.value = 8;
-    limiter.ratio.value = 10;
+    limiter.threshold.value = -10;
+    limiter.knee.value = 12;
+    limiter.ratio.value = 8;
     limiter.attack.value = 0.002;
     limiter.release.value = 0.12;
     this.output = this.track(ctx.createGain());
@@ -1084,41 +1110,54 @@ export class EngineAudio {
     this.effects.gain.value = 0.5;
     this.effects.connect(this.sfxBus);
 
-    // Engine exhaust distortion wave shaper for aggressive F1 rasp
+    // Gentle saturation adds body without a broadband buzzing edge.
     this.exhaustShaper = this.track(ctx.createWaveShaper());
     const curve = new Float32Array(512);
     for (let i = 0; i < 512; i++) {
       const x = (i * 2) / 512 - 1;
-      curve[i] = Math.tanh(2.4 * x);
+      curve[i] = Math.tanh(1.1 * x) / Math.tanh(1.1);
     }
     this.exhaustShaper.curve = curve;
+    this.exhaustShaper.oversample = "2x";
 
-    // Screamer resonance filter (F1 tuned exhaust header acoustic formant)
+    // Final treble rolloff prevents fatiguing whistle and exhaust harmonics.
     this.screamerFilter = this.track(ctx.createBiquadFilter());
-    this.screamerFilter.type = "bandpass";
-    this.screamerFilter.frequency.value = 1800;
-    this.screamerFilter.Q.value = 2.4;
+    this.screamerFilter.type = "lowpass";
+    this.screamerFilter.frequency.value = 3800;
+    this.screamerFilter.Q.value = 0.65;
 
     // Intake throat lowpass filter
     this.intakeFilter = this.track(ctx.createBiquadFilter());
     this.intakeFilter.type = "lowpass";
     this.intakeFilter.frequency.value = 1200;
-    this.intakeFilter.Q.value = 2.0;
+    this.intakeFilter.Q.value = 0.65;
 
     this.engineGain = this.track(ctx.createGain());
     this.engineGain.gain.value = 0.4;
 
     // Route engine oscillators:
-    // Sub/mid/high -> Intake Filter -> Shaper -> Screamer Filter & Master
+    // Voices -> Intake Filter -> Shaper -> Treble Filter -> Engine gain
     this.intakeFilter.connect(this.exhaustShaper);
     this.exhaustShaper.connect(this.screamerFilter);
     this.screamerFilter.connect(this.engineGain);
-    this.exhaustShaper.connect(this.engineGain);
     this.engineGain.connect(this.master);
 
-    // 1. Sub-bass fundamental (chassis shudder)
+    // Finite harmonics avoid the brittle, alias-prone sawtooth stack. Each
+    // voice has its own envelope; no recorded engine loop is repeated.
+    const harmonicWave = (partials) => {
+      const real = new Float32Array(partials.length + 1);
+      const imag = new Float32Array(partials.length + 1);
+      partials.forEach((amplitude, i) => {
+        imag[i + 1] = amplitude;
+      });
+      return ctx.createPeriodicWave(real, imag);
+    };
+    this.combustionWave = harmonicWave([1, 0.42, 0.19, 0.08, 0.025]);
+    this.exhaustWave = harmonicWave([1, 0.18, 0.045]);
+
+    // 1. Low chassis body
     this.subOsc = this.track(ctx.createOscillator());
-    this.subOsc.type = "sawtooth";
+    this.subOsc.type = "sine";
     this.subGain = this.track(ctx.createGain());
     this.subGain.gain.value = 0.32;
     this.subOsc.connect(this.subGain);
@@ -1126,25 +1165,25 @@ export class EngineAudio {
 
     // 2. Mid harmonic combustion growl (2nd & 3rd harmonics)
     this.midOsc = this.track(ctx.createOscillator());
-    this.midOsc.type = "sawtooth";
+    this.midOsc.setPeriodicWave(this.combustionWave);
     this.midGain = this.track(ctx.createGain());
-    this.midGain.gain.value = 0.45;
+    this.midGain.gain.value = 0.38;
     this.midOsc.connect(this.midGain);
     this.midGain.connect(this.intakeFilter);
 
-    // 3. High-RPM screamer harmonic (high pulse wave)
+    // 3. Restrained upper racing harmonic
     this.highOsc = this.track(ctx.createOscillator());
     this.highOsc.type = "triangle";
     this.highGain = this.track(ctx.createGain());
-    this.highGain.gain.value = 0.35;
+    this.highGain.gain.value = 0.09;
     this.highOsc.connect(this.highGain);
     this.highGain.connect(this.intakeFilter);
 
-    // 4. Combustion cylinder rasp (sharp sawtooth 4th harmonic)
+    // 4. Softer exhaust overtone
     this.raspOsc = this.track(ctx.createOscillator());
-    this.raspOsc.type = "sawtooth";
+    this.raspOsc.setPeriodicWave(this.exhaustWave);
     this.raspGain = this.track(ctx.createGain());
-    this.raspGain.gain.value = 0.28;
+    this.raspGain.gain.value = 0.055;
     this.raspOsc.connect(this.raspGain);
     this.raspGain.connect(this.intakeFilter);
 
@@ -1156,7 +1195,7 @@ export class EngineAudio {
     this.turboFilter = this.track(ctx.createBiquadFilter());
     this.turboFilter.type = "bandpass";
     this.turboFilter.frequency.value = 3200;
-    this.turboFilter.Q.value = 4.0;
+    this.turboFilter.Q.value = 0.7;
     this.turboOsc.connect(this.turboFilter);
     this.turboFilter.connect(this.turboGain);
     this.turboGain.connect(this.master);
@@ -1169,13 +1208,13 @@ export class EngineAudio {
     this.mguFilter = this.track(ctx.createBiquadFilter());
     this.mguFilter.type = "bandpass";
     this.mguFilter.frequency.value = 4200;
-    this.mguFilter.Q.value = 5.0;
+    this.mguFilter.Q.value = 0.7;
     this.mguOsc.connect(this.mguFilter);
     this.mguFilter.connect(this.mguGain);
     this.mguGain.connect(this.master);
 
     // 6. Wind noise generator (high speed rush)
-    const bufferSize = ctx.sampleRate * 2;
+    const bufferSize = ctx.sampleRate * 5;
     const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const output = noiseBuffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) {
@@ -1188,7 +1227,7 @@ export class EngineAudio {
     this.windFilter = this.track(ctx.createBiquadFilter());
     this.windFilter.type = "bandpass";
     this.windFilter.frequency.value = 800;
-    this.windFilter.Q.value = 1.2;
+    this.windFilter.Q.value = 0.65;
 
     this.windGain = this.track(ctx.createGain());
     this.windGain.gain.value = 0;
@@ -1201,11 +1240,12 @@ export class EngineAudio {
     const skidSource = this.track(ctx.createBufferSource());
     skidSource.buffer = noiseBuffer;
     skidSource.loop = true;
+    skidSource.playbackRate.value = 0.91;
 
     this.skidFilter = this.track(ctx.createBiquadFilter());
     this.skidFilter.type = "bandpass";
     this.skidFilter.frequency.value = 1350;
-    this.skidFilter.Q.value = 3.2;
+    this.skidFilter.Q.value = 0.85;
 
     this.skidGain = this.track(ctx.createGain());
     this.skidGain.gain.value = 0;
@@ -1260,27 +1300,31 @@ export class EngineAudio {
     if (
       racing &&
       !finished &&
+      now >= this.nextShift &&
       safeSpeed > (gearThresholds[gear - 1] ?? Infinity) &&
       gear < 6
     ) {
       // Upshift: ignition cut and exhaust crackle
       gear++;
       this.gear = gear;
-      this.shiftUntil = now + 65;
+      this.shiftUntil = now + 100;
+      this.nextShift = now + 220;
       this.shiftType = "up";
-      this.exhaustPop(0.7);
+      this.exhaustPop(0.24);
     } else if (
       racing &&
       !finished &&
+      now >= this.nextShift &&
       gear > 1 &&
       safeSpeed < gearThresholds[gear - 2] - 3.5
     ) {
       // Downshift: rev-match throttle blip
       gear--;
       this.gear = gear;
-      this.shiftUntil = now + 80;
+      this.shiftUntil = now + 100;
+      this.nextShift = now + 220;
       this.shiftType = "down";
-      this.exhaustPop(0.4);
+      this.exhaustPop(0.14);
     }
 
     if (!racing || finished) {
@@ -1314,7 +1358,7 @@ export class EngineAudio {
     }
 
     // Smooth RPM response
-    const rpmAttack = throttle ? 18 : 12;
+    const rpmAttack = throttle ? 12 : 8;
     this.rpm += (targetRpm - this.rpm) * (1 - Math.exp(-dt * rpmAttack));
     if (!Number.isFinite(this.rpm)) this.rpm = this.idleRpm;
 
@@ -1326,39 +1370,40 @@ export class EngineAudio {
 
     // Turbo boost pressure simulation
     const targetBoost =
-      throttle && racing && Math.abs(safeSpeed) > 5 ? 1.0 : 0.0;
+      throttle && racing && !finished && Math.abs(safeSpeed) > 5 ? 1.0 : 0.0;
     this.boost +=
       (targetBoost - this.boost) * (1 - Math.exp(-dt * (throttle ? 4 : 8)));
     if (!Number.isFinite(this.boost)) this.boost = 0;
 
+    const targetLoad =
+      racing && !finished ? (throttle ? 1 : brake ? 0.12 : 0.3) : 0.08;
+    this.load += (targetLoad - this.load) * (1 - Math.exp(-dt * 8));
     if (!this.ctx || !this.enabled || this.suspended) return;
+    const t = this.ctx.currentTime;
+    if (t < this.nextEngineUpdate) return;
+    this.nextEngineUpdate = t + 1 / 30;
     try {
-      const t = this.ctx.currentTime;
       this.master.gain.setTargetAtTime(
-        racing && !finished ? 0.4 : 0.14,
+        racing && !finished ? 0.36 : 0.08,
         t,
         0.06,
       );
       this.effects.gain.setTargetAtTime(0.25, t, 0.03);
       const isShifting = now < this.shiftUntil && this.shiftType === "up";
 
-      // High-RPM rev limiter bouncing at redline
-      let limiterCut = 1.0;
-      if (this.rpm > 13150 && throttle) {
-        limiterCut = Math.sin(now * 0.08) > 0.1 ? 1.0 : 0.06;
-        if (limiterCut < 0.5 && Math.random() < 0.25) {
-          this.exhaustPop(0.35);
-        }
-      }
+      // A soft redline pulse conveys ignition limiting without hard muting.
+      const limiterCut =
+        this.rpm > 13150 && throttle ? 0.86 + 0.14 * Math.sin(now * 0.045) : 1;
 
       // A four-stroke V6 has three firing pulses per crank revolution.
       // At 12,000 RPM its firing fundamental is 600 Hz; the sub voice
       // preserves low body while the upper voices carry the racing tone.
       const baseFreq = Math.max(38, (this.rpm / 60) * 3);
-      const cut = (isShifting ? 0.15 : 1.0) * limiterCut;
+      const cut = (isShifting ? 0.38 : 1.0) * limiterCut;
 
       // Frequency modulation for organic combustion feel
-      const jitter = Math.sin(now * 0.08) * 1.5;
+      const jitter =
+        Math.sin(now * 0.0017) * 0.8 + Math.sin(now * 0.0023) * 0.35;
       this.subOsc.frequency.setTargetAtTime(baseFreq * 0.5, t, 0.02);
       this.midOsc.frequency.setTargetAtTime(baseFreq + jitter, t, 0.02);
       this.highOsc.frequency.setTargetAtTime(
@@ -1366,58 +1411,56 @@ export class EngineAudio {
         t,
         0.02,
       );
-      this.raspOsc.frequency.setTargetAtTime(baseFreq * 3, t, 0.02);
+      this.raspOsc.frequency.setTargetAtTime(baseFreq * 1.5, t, 0.045);
 
       // Turbo whistle tracks boost pressure and RPM
       const turboFreq =
-        2200 + this.boost * 2400 + (this.rpm / this.maxRpm) * 800;
+        1500 + this.boost * 650 + (this.rpm / this.maxRpm) * 350;
       this.turboOsc.frequency.setTargetAtTime(turboFreq, t, 0.03);
       this.turboGain.gain.setTargetAtTime(
-        racing ? this.boost * 0.14 : 0,
+        racing && !finished ? this.boost * 0.012 : 0,
         t,
         0.05,
       );
 
       // MGU-K / MGU-H electric hybrid spool whine
       if (this.mguOsc && this.mguGain) {
-        const mguFreq = 3400 + (this.rpm / this.maxRpm) * 2200;
+        const mguFreq = 1700 + (this.rpm / this.maxRpm) * 700;
         this.mguOsc.frequency.setTargetAtTime(mguFreq, t, 0.03);
         const mguVol =
-          racing && throttle && safeSpeed > 12
-            ? Math.min(0.07, (safeSpeed / 50) * 0.07)
+          racing && !finished && throttle && safeSpeed > 12
+            ? Math.min(0.006, (safeSpeed / 50) * 0.006)
             : 0;
         this.mguGain.gain.setTargetAtTime(mguVol, t, 0.04);
       }
 
-      // Off-throttle overrun burble / crackle on lift-off at high RPM
-      if (racing && !throttle && safeSpeed > 16 && this.rpm > 6800) {
-        if (Math.random() < 0.16 && now - this.lastPop > 85) {
-          this.exhaustPop(0.28 + Math.random() * 0.22);
-        }
-      }
-
       // Formant acoustic filters
       const filterCutoff = Math.min(
-        7500,
+        4200,
         Math.max(
           450,
-          700 + (this.rpm / this.maxRpm) * 5800 * (throttle ? 1.35 : 0.65),
+          650 + (this.rpm / this.maxRpm) * 2900 * (0.6 + this.load * 0.4),
         ),
       );
       this.intakeFilter.frequency.setTargetAtTime(filterCutoff, t, 0.03);
       this.screamerFilter.frequency.setTargetAtTime(
-        1400 + (this.rpm / this.maxRpm) * 2200,
+        2200 + (this.rpm / this.maxRpm) * 2200,
         t,
         0.04,
       );
 
       // Engine volume
-      const baseGain = racing && !finished ? (throttle ? 0.62 : 0.38) : 0.22;
+      const baseGain = racing && !finished ? 0.3 + this.load * 0.23 : 0.16;
+      this.highGain.gain.setTargetAtTime(0.035 + this.load * 0.055, t, 0.06);
+      this.raspGain.gain.setTargetAtTime(0.02 + this.load * 0.035, t, 0.06);
       this.engineGain.gain.setTargetAtTime(baseGain * cut, t, 0.03);
 
       // Aerodynamic high-speed wind roar
-      const windIntensity = Math.min(1, Math.max(0, (safeSpeed - 15) / 35));
-      this.windGain.gain.setTargetAtTime(windIntensity * 0.28, t, 0.06);
+      const windIntensity =
+        racing && !finished
+          ? Math.min(1, Math.max(0, (safeSpeed - 15) / 35))
+          : 0;
+      this.windGain.gain.setTargetAtTime(windIntensity * 0.13, t, 0.06);
       this.windFilter.frequency.setTargetAtTime(
         500 + windIntensity * 1600,
         t,
@@ -1427,25 +1470,34 @@ export class EngineAudio {
       // Tire squeal (drift or heavy braking)
       const isDrifting = drift && safeSpeed > 8;
       const isLockingBrakes = brake && safeSpeed > 16;
-      const skidIntensity = isDrifting ? 0.38 : isLockingBrakes ? 0.26 : 0;
+      const skidIntensity =
+        racing && !finished
+          ? isDrifting
+            ? 0.16
+            : isLockingBrakes
+              ? 0.1
+              : 0
+          : 0;
       this.skidGain.gain.setTargetAtTime(skidIntensity, t, 0.04);
       this.skidFilter.frequency.setTargetAtTime(
-        isDrifting ? 1450 : 1850,
+        isDrifting ? 950 : 1200,
         t,
         0.04,
       );
 
       // Apex kerb rumble
       const kerbIntensity =
-        onKerb && safeSpeed > 6 ? Math.min(0.4, safeSpeed / 60) : 0;
+        racing && !finished && onKerb && safeSpeed > 6
+          ? Math.min(0.18, safeSpeed / 180)
+          : 0;
       this.kerbGain.gain.setTargetAtTime(kerbIntensity, t, 0.03);
     } catch {}
   }
 
   exhaustPop(intensity = 0.6) {
-    if (!this.ctx || !this.effects || !this.enabled) return;
+    if (!this.ctx || !this.effects || !this.enabled || this.suspended) return;
     const now = performance.now();
-    if (now - this.lastPop < 75) return;
+    if (now - this.lastPop < 180) return;
     this.lastPop = now;
 
     const t = this.ctx.currentTime;
@@ -1459,7 +1511,7 @@ export class EngineAudio {
 
     popGain.gain.setValueAtTime(0, t);
     popGain.gain.linearRampToValueAtTime(
-      Math.max(0.001, safeIntensity * 0.5),
+      Math.max(0.001, safeIntensity * 0.28),
       t + 0.006,
     );
     popGain.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
@@ -1478,10 +1530,10 @@ export class EngineAudio {
   }
 
   wastegateFlutter(boost = 0.5) {
-    if (!this.ctx || !this.effects || !this.enabled) return;
+    if (!this.ctx || !this.effects || !this.enabled || this.suspended) return;
     const t = this.ctx.currentTime;
     const safeBoost = Math.max(0.05, Math.min(1.0, boost));
-    const bursts = 4;
+    const bursts = 2;
     for (let i = 0; i < bursts; i++) {
       const delay = i * 0.055;
       const decay = Math.pow(0.55, i);
@@ -1489,17 +1541,17 @@ export class EngineAudio {
       const flutterFilter = this.track(this.ctx.createBiquadFilter());
       const flutterGain = this.track(this.ctx.createGain());
 
-      flutterOsc.type = "sawtooth";
+      flutterOsc.type = "triangle";
       flutterOsc.frequency.setValueAtTime(950 - i * 85, t + delay);
       flutterOsc.frequency.exponentialRampToValueAtTime(320, t + delay + 0.045);
 
       flutterFilter.type = "bandpass";
       flutterFilter.frequency.setValueAtTime(1600 - i * 140, t + delay);
-      flutterFilter.Q.value = 5.0;
+      flutterFilter.Q.value = 0.75;
 
       flutterGain.gain.setValueAtTime(0, t + delay);
       flutterGain.gain.linearRampToValueAtTime(
-        Math.max(0.001, safeBoost * 0.22 * decay),
+        Math.max(0.001, safeBoost * 0.075 * decay),
         t + delay + 0.006,
       );
       flutterGain.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.045);
@@ -1521,7 +1573,7 @@ export class EngineAudio {
   }
 
   countdownLight(step) {
-    if (!this.ctx || !this.effects || !this.enabled) return;
+    if (!this.ctx || !this.effects || !this.enabled || this.suspended) return;
     const t = this.ctx.currentTime;
     if (step >= 1 && step <= 5) {
       // 5 Red Lights arming tones
@@ -1569,7 +1621,7 @@ export class EngineAudio {
   }
 
   beep(frequency = 600, duration = 0.12, volume = 1) {
-    if (!this.ctx || !this.effects || !this.enabled) return;
+    if (!this.ctx || !this.effects || !this.enabled || this.suspended) return;
     const o = this.track(this.ctx.createOscillator());
     const g = this.track(this.ctx.createGain());
     const t = this.ctx.currentTime;
@@ -1602,15 +1654,20 @@ export class EngineAudio {
       if (safeAmount > 0.12 && performance.now() - this.lastImpact > 180) {
         this.lastImpact = performance.now();
         const t = this.ctx?.currentTime;
-        if (!t || !this.enabled || !this.effects) return;
+        if (t === undefined || !this.enabled || this.suspended || !this.effects)
+          return;
 
         // Heavy body/barrier thud
         const o = this.track(this.ctx.createOscillator());
         const g = this.track(this.ctx.createGain());
-        o.type = "sawtooth";
+        o.type = "triangle";
         o.frequency.setValueAtTime(80 + safeAmount * 60, t);
         o.frequency.exponentialRampToValueAtTime(25, t + 0.16);
-        g.gain.setValueAtTime(Math.min(0.8, safeAmount * 0.7), t);
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(
+          Math.min(0.45, safeAmount * 0.45),
+          t + 0.006,
+        );
         g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
         o.connect(g);
         g.connect(this.effects);
@@ -1627,7 +1684,7 @@ export class EngineAudio {
   }
 
   celebrate() {
-    if (!this.ctx || !this.effects || !this.enabled) return;
+    if (!this.ctx || !this.effects || !this.enabled || this.suspended) return;
     // Grand Prix podium fanfare
     const chords = [
       [523.25, 659.25, 783.99], // C
@@ -1703,12 +1760,12 @@ export class EngineAudio {
         panner.rolloffFactor = 1.0;
 
         const osc = this.track(this.ctx.createOscillator());
-        osc.type = "sawtooth";
+        osc.setPeriodicWave(this.combustionWave);
 
         const filter = this.track(this.ctx.createBiquadFilter());
-        filter.type = "bandpass";
+        filter.type = "lowpass";
         filter.frequency.value = 850;
-        filter.Q.value = 2.2;
+        filter.Q.value = 0.65;
 
         const gain = this.track(this.ctx.createGain());
         gain.gain.value = 0;
@@ -1761,8 +1818,8 @@ export class EngineAudio {
         0.04,
       );
       const targetVol = Math.min(
-        0.32,
-        (0.045 + (safeSpeed / 45) * 0.275) * (throttle ? 1.0 : 0.72),
+        0.2,
+        (0.025 + (safeSpeed / 45) * 0.175) * (throttle ? 1.0 : 0.72),
       );
       node.gain.gain.setTargetAtTime(targetVol, t, 0.04);
     } catch {}
@@ -1790,7 +1847,7 @@ export class EngineAudio {
   }
 
   listener(position, forward) {
-    if (!this.ctx || !this.enabled) return;
+    if (!this.ctx || !this.enabled || this.suspended) return;
     if (
       !position ||
       !forward ||
@@ -1833,7 +1890,7 @@ export class EngineAudio {
     } catch {}
   }
   silence() {
-    if (this.quiet) return;
+    if (!this.ctx || this.quiet) return;
     this.quiet = true;
     for (const gain of [
       this.master,
@@ -1866,7 +1923,7 @@ import "@fontsource/dm-sans/latin-600.css";
 import "./style.css";
 import { io } from "socket.io-client";
 import { createScene } from "./scene.js";
-import { TRACK, LENGTH, point, nearest } from "../../shared/track.js";
+import { getTrack } from "../../shared/track.js";
 import { validSnapshot } from "../../shared/protocol.js";
 
 const $ = (id) => document.getElementById(id),
@@ -1875,8 +1932,16 @@ const $ = (id) => document.getElementById(id),
   inputSources = new Map(),
   map = $("minimap").getContext("2d");
 
-const toCX = (x) => 95 + (x + 20) * 0.23;
-const toCY = (z) => 100 - (z - 5) * 0.23;
+let track = getTrack(),
+  TRACK = track,
+  LENGTH = track.length,
+  point = track.point,
+  nearest = track.nearest,
+  mapCenterX = 0,
+  mapCenterZ = 0,
+  mapScale = 1;
+const toCX = (x) => 90 + (x - mapCenterX) * mapScale;
+const toCY = (z) => 100 - (z - mapCenterZ) * mapScale;
 
 // Pre-render static minimap background once to prevent 3200 binary searches/sec
 const mapBg = document.createElement("canvas");
@@ -1884,29 +1949,35 @@ mapBg.width = 180;
 mapBg.height = 200;
 const bgCtx = mapBg.getContext("2d");
 
-bgCtx.beginPath();
-for (let i = 0; i <= 160; i++) {
-  const p = point((i * LENGTH) / 160);
-  if (i === 0) bgCtx.moveTo(toCX(p.x), toCY(p.z));
-  else bgCtx.lineTo(toCX(p.x), toCY(p.z));
+function rebuildMinimap() {
+  const { minX, maxX, minZ, maxZ } = track.bounds;
+  mapCenterX = (minX + maxX) / 2;
+  mapCenterZ = (minZ + maxZ) / 2;
+  mapScale = Math.min(150 / (maxX - minX), 170 / (maxZ - minZ));
+  bgCtx.clearRect(0, 0, 180, 200);
+  bgCtx.beginPath();
+  for (let i = 0; i <= 160; i++) {
+    const p = point((i * LENGTH) / 160);
+    if (i === 0) bgCtx.moveTo(toCX(p.x), toCY(p.z));
+    else bgCtx.lineTo(toCX(p.x), toCY(p.z));
+  }
+  bgCtx.closePath();
+  bgCtx.strokeStyle = "#b1c4a444";
+  bgCtx.lineWidth = Math.max(7, track.width * mapScale + 3);
+  bgCtx.stroke();
+  bgCtx.strokeStyle = "#d6fc71aa";
+  bgCtx.lineWidth = 3;
+  bgCtx.stroke();
+  const f0 = point(0, -track.width / 2),
+    f1 = point(0, track.width / 2);
+  bgCtx.beginPath();
+  bgCtx.moveTo(toCX(f0.x), toCY(f0.z));
+  bgCtx.lineTo(toCX(f1.x), toCY(f1.z));
+  bgCtx.strokeStyle = "#ffffff";
+  bgCtx.lineWidth = 2.5;
+  bgCtx.stroke();
 }
-bgCtx.closePath();
-bgCtx.strokeStyle = "#b1c4a444";
-bgCtx.lineWidth = 14;
-bgCtx.stroke();
-
-bgCtx.strokeStyle = "#d6fc71aa";
-bgCtx.lineWidth = 3;
-bgCtx.stroke();
-
-const f0 = point(0, -11),
-  f1 = point(0, 11);
-bgCtx.beginPath();
-bgCtx.moveTo(toCX(f0.x), toCY(f0.z));
-bgCtx.lineTo(toCX(f1.x), toCY(f1.z));
-bgCtx.strokeStyle = "#ffffff";
-bgCtx.lineWidth = 2.5;
-bgCtx.stroke();
+rebuildMinimap();
 
 let view,
   state,
@@ -1916,7 +1987,9 @@ let view,
   lastCountdown = "",
   lastPhase = "",
   lastGantryStep = -1,
-  quality = 1;
+  quality = 1,
+  cameraIndex = 0;
+const cameraModes = ["chase", "cockpit", "overhead"];
 
 window.__getState = () => (state ? structuredClone(state) : null);
 window.__getKeys = () => ({ ...keys });
@@ -1981,7 +2054,7 @@ function notice(text) {
 }
 
 try {
-  view = createScene($("game"), engineAudio);
+  view = createScene($("game"), engineAudio, track);
 } catch (e) {
   notice(
     "3D could not start. Enable browser hardware acceleration and reload.",
@@ -2015,6 +2088,9 @@ $("audioSettings").onclick = () => {
   $("audioSettings").setAttribute("aria-expanded", String(open));
 };
 for (const name of ["Master", "Engine", "Music", "Sfx"]) {
+  const initial = Math.round(engineAudio.volumes[name.toLowerCase()] * 100);
+  $("volume" + name).value = initial;
+  $("value" + name).textContent = initial + "%";
   $("volume" + name).oninput = () => {
     const value = Number($("volume" + name).value);
     $("value" + name).textContent = value + "%";
@@ -2034,6 +2110,39 @@ $("quality").onclick = () => {
   $("quality").textContent =
     "QUALITY " + ["LOW", "MEDIUM", "HIGH", "ULTRA"][quality];
 };
+
+function cycleCamera() {
+  cameraIndex = (cameraIndex + 1) % cameraModes.length;
+  const mode = cameraModes[cameraIndex];
+  view?.camera(mode);
+  $("camera").textContent = "VIEW " + mode.toUpperCase() + " · C";
+}
+$("camera").onclick = cycleCamera;
+
+function selectTrack(id) {
+  const next = getTrack(id);
+  if (next.id === track.id && view) return;
+  view?.dispose();
+  view = null;
+  track = next;
+  TRACK = track;
+  LENGTH = track.length;
+  point = track.point;
+  nearest = track.nearest;
+  rebuildMinimap();
+  clearControls();
+  inputHistory = [];
+  lastMap = 0;
+  try {
+    view = createScene($("game"), engineAudio, track);
+    view.quality(quality);
+    view.camera(cameraModes[cameraIndex]);
+    view.network(offset, networkRtt, networkJitter);
+  } catch (error) {
+    notice("Circuit could not load. Reload to reconnect to your room.");
+    console.error(error);
+  }
+}
 
 const invite = new URLSearchParams(location.search).get("room");
 if (invite) $("code").value = invite.toUpperCase().slice(0, 5);
@@ -2250,6 +2359,8 @@ function render() {
   if (!state) return;
 
   const host = state.host === socket.id;
+  setText("trackName", track.name.toUpperCase());
+  setText("lobbyTrack", track.name + " · " + Math.round(LENGTH) + " m");
   const reconnecting = new Set(state.reconnecting || []);
   $("roomCode").textContent = state.code;
   setHtml(
@@ -2327,6 +2438,7 @@ socket.on("state", (s) => {
   if (!validSnapshot(s) || (state?.code === s.code && s.seq <= state.seq))
     return;
   engineAudio.setPhase(s.phase);
+  selectTrack(s.trackId);
   state = s;
   if (!clockKnown) {
     offset = s.serverNow - Date.now();
@@ -2364,7 +2476,12 @@ socket.on("state", (s) => {
     lastPhase = s.phase;
   }
   sendInput();
-  const signature = s.phase + s.host + s.players.map((p) => p.id).join(",");
+  const signature =
+    s.phase +
+    s.host +
+    s.trackId +
+    s.reconnecting.join(",") +
+    s.players.map((p) => p.id).join(",");
   if (signature !== uiSignature || performance.now() - lastRender > 100) {
     render();
     lastRender = performance.now();
@@ -2440,6 +2557,11 @@ function clearControls() {
 
 window.addEventListener("keydown", (e) => {
   if (e.target instanceof HTMLInputElement) return;
+  if (e.code === "KeyC" && !e.repeat) {
+    e.preventDefault();
+    cycleCamera();
+    return;
+  }
   const key = resolveKey(e);
   if (key && state) {
     e.preventDefault();
@@ -2594,7 +2716,9 @@ function frame() {
     const safeX = Number.isFinite(c.x) ? c.x : 0;
     const safeZ = Number.isFinite(c.z) ? c.z : 0;
     const distFromCenter = nearest(safeX, safeZ).distance;
-    const onKerb = distFromCenter >= 9.8 && distFromCenter <= 11.6;
+    const onKerb =
+      distFromCenter >= TRACK.width / 2 - 1.2 &&
+      distFromCenter <= TRACK.width / 2 + 0.6;
     try {
       engineAudio.update(
         Number.isFinite(c.speed) ? c.speed : 0,
@@ -2606,7 +2730,14 @@ function frame() {
         onKerb,
       );
 
-      if (sound) engineAudio.impact(Number.isFinite(c.impact) ? c.impact : 0);
+      if (sound)
+        engineAudio.impact(
+          state.phase === "racing" &&
+            c.finished === null &&
+            Number.isFinite(c.impact)
+            ? c.impact
+            : 0,
+        );
     } catch {}
 
     setText(
@@ -2793,12 +2924,19 @@ import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
-import { TRACK, LENGTH, point, gates, nearest } from "../../shared/track.js";
+import { getTrack } from "../../shared/track.js";
 
 import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { RawCubeTexture } from "@babylonjs/core/Materials/Textures/rawCubeTexture";
 import { overlap } from "../../shared/contact.js";
-export function createScene(canvas, audioSystem = null) {
+export function createScene(canvas, audioSystem = null, track = getTrack()) {
+  const TRACK = track,
+    LENGTH = track.length,
+    point = track.point,
+    gates = track.gates,
+    nearest = track.nearest;
+  let cameraMode = "chase",
+    cameraTransition = 1;
   const engine = new Engine(canvas, true, {
     stencil: false,
     preserveDrawingBuffer: false,
@@ -2806,6 +2944,10 @@ export function createScene(canvas, audioSystem = null) {
   engine.setHardwareScalingLevel(1.5);
 
   const scene = new Scene(engine);
+  // Driving never ray-picks meshes; avoid automatic pointer scans over the circuit.
+  scene.skipPointerMovePicking = true;
+  scene.skipPointerDownPicking = true;
+  scene.skipPointerUpPicking = true;
   // Atmospheric haze and clear sky
   scene.clearColor = new Color4(0.58, 0.77, 0.74, 1);
   scene.fogMode = Scene.FOGMODE_EXP2;
@@ -2861,7 +3003,7 @@ export function createScene(canvas, audioSystem = null) {
   const isSoftware = /swiftshader|llvmpipe/i.test(glRenderer);
   if (!isSoftware) {
     try {
-      shadowGen = new ShadowGenerator(1024, sun);
+      shadowGen = new ShadowGenerator(512, sun);
       shadowGen.bias = 0.003;
       shadowGen.normalBias = 0.002;
     } catch (e) {
@@ -2869,9 +3011,14 @@ export function createScene(canvas, audioSystem = null) {
     }
   }
 
-  const camera = new FreeCamera("camera", new Vector3(180, 110, -150), scene);
-  camera.setTarget(new Vector3(120, 0, 0));
-  camera.minZ = 0.2;
+  const introPoint = point(0);
+  const camera = new FreeCamera(
+    "camera",
+    new Vector3(introPoint.x + 60, 55, introPoint.z - 70),
+    scene,
+  );
+  camera.setTarget(new Vector3(introPoint.x, 0, introPoint.z));
+  camera.minZ = 0.08;
   camera.maxZ = 1600;
   camera.fov = 0.82;
 
@@ -3026,7 +3173,7 @@ export function createScene(canvas, audioSystem = null) {
   }
 
   // Smooth wide road ribbon (22m wide)
-  const edges = [-11, 11].map((offset) =>
+  const edges = [-TRACK.width / 2, TRACK.width / 2].map((offset) =>
     Array.from({ length: TRACK.segments + 1 }, (_, i) => {
       const p = point((i * LENGTH) / TRACK.segments, offset);
       return new Vector3(p.x, 0.08, p.z);
@@ -3037,6 +3184,29 @@ export function createScene(canvas, audioSystem = null) {
     { pathArray: edges, sideOrientation: 2 },
     scene,
   );
+  const asphalt = new DynamicTexture(
+    "fine asphalt grain",
+    { width: 128, height: 128 },
+    scene,
+    false,
+  );
+  const asphaltContext = asphalt.getContext();
+  const pixels = asphaltContext.createImageData(128, 128);
+  let grainSeed = 481;
+  for (let i = 0; i < pixels.data.length; i += 4) {
+    grainSeed = (Math.imul(grainSeed, 1664525) + 1013904223) >>> 0;
+    const grain = 52 + ((grainSeed >>> 24) % 13);
+    pixels.data[i] = grain;
+    pixels.data[i + 1] = grain + 3;
+    pixels.data[i + 2] = grain + 5;
+    pixels.data[i + 3] = 255;
+  }
+  asphaltContext.putImageData(pixels, 0, 0);
+  asphalt.update();
+  asphalt.uScale = 3;
+  asphalt.vScale = LENGTH / 8;
+  road.diffuseTexture = asphalt;
+  road.diffuseColor = Color3.White();
   surface.material = road;
   surface.receiveShadows = !!shadowGen;
 
@@ -3062,8 +3232,8 @@ export function createScene(canvas, audioSystem = null) {
     const p = point(sMid);
 
     for (const side of [-1, 1]) {
-      const curbDist = side * 10.6;
-      const wallDist = side * 11.6;
+      const curbDist = side * (TRACK.width / 2 - 0.4);
+      const wallDist = side * (TRACK.width / 2 + 0.6);
       const curbPos = point(sMid, curbDist);
       const wallPos = point(sMid, wallDist);
 
@@ -3124,8 +3294,9 @@ export function createScene(canvas, audioSystem = null) {
   }
 
   // Checkered start / finish line
-  for (let i = 0; i < 14; i++) {
-    const offset = -9.75 + i * 1.5;
+  const checkerCount = Math.floor(TRACK.width / 1.5);
+  for (let i = 0; i < checkerCount; i++) {
+    const offset = -(checkerCount - 1) * 0.75 + i * 1.5;
     const p = point(0, offset);
     for (let j = 0; j < 2; j++) {
       box(
@@ -3133,10 +3304,11 @@ export function createScene(canvas, audioSystem = null) {
         1.5,
         0.04,
         1.4,
-        p.x,
+        p.x + Math.sin(p.yaw) * j * 1.4,
         0.12,
-        p.z + j * 1.4,
+        p.z + Math.cos(p.yaw) * j * 1.4,
         (i + j) % 2 ? dark : cream,
+        p.yaw,
       );
     }
   }
@@ -3193,12 +3365,36 @@ export function createScene(canvas, audioSystem = null) {
 
   // Start / finish gantry arch
   const startP = point(0);
-  box("gantry left", 0.9, 9, 0.9, startP.x - 13.5, 4.5, startP.z, metal);
-  box("gantry right", 0.9, 9, 0.9, startP.x + 13.5, 4.5, startP.z, metal);
-  const arch = box("start arch", 28, 2.4, 1.2, startP.x, 9, startP.z, lime);
+  const gantryRoot = new TransformNode("starting gantry", scene);
+  gantryRoot.position.set(startP.x, 0, startP.z);
+  gantryRoot.rotation.y = startP.yaw;
+  const gantryHalf = TRACK.width / 2 + 2.5;
+  box("gantry left", 0.9, 9, 0.9, -gantryHalf, 4.5, 0, metal, 0, gantryRoot);
+  box("gantry right", 0.9, 9, 0.9, gantryHalf, 4.5, 0, metal, 0, gantryRoot);
+  const arch = box(
+    "start arch",
+    gantryHalf * 2 + 1,
+    2.4,
+    1.2,
+    0,
+    9,
+    0,
+    lime,
+    0,
+    gantryRoot,
+  );
   if (shadowGen) shadowGen.addShadowCaster(arch);
-
-  sign("APEX GRAND PRIX", startP.x, 9, startP.z - 0.7, 24, 2.2, 0, 80);
+  const title = sign(
+    "APEX GRAND PRIX",
+    0,
+    9,
+    -0.7,
+    TRACK.width + 2,
+    2.2,
+    0,
+    80,
+  );
+  title.parent = gantryRoot;
 
   // 5 Synchronized 3D Start Gantry Lights (Facing drivers on the grid)
   const gantryBulbs = [];
@@ -3206,15 +3402,27 @@ export function createScene(canvas, audioSystem = null) {
   const gantryRedMat = material("gantryRed", "#ff2222", 0.9, "#ff1818");
   const gantryGreenMat = material("gantryGreen", "#22ff44", 0.9, "#16ff38");
   for (let i = 0; i < 5; i++) {
-    const lx = startP.x + (i - 2) * 2.2;
-    box("gantry housing " + i, 1.3, 1.8, 0.45, lx, 7.3, startP.z - 0.65, dark);
+    const lx = (i - 2) * 2.2;
+    box(
+      "gantry housing " + i,
+      1.3,
+      1.8,
+      0.45,
+      lx,
+      7.3,
+      -0.65,
+      dark,
+      0,
+      gantryRoot,
+    );
     const bulb = MeshBuilder.CreateCylinder(
       "gantry bulb " + i,
       { diameter: 0.76, height: 0.14, tessellation: 16 },
       scene,
     );
     bulb.rotation.x = Math.PI / 2;
-    bulb.position.set(lx, 7.3, startP.z - 0.88);
+    bulb.parent = gantryRoot;
+    bulb.position.set(lx, 7.3, -0.88);
     bulb.material = gantryOffMat;
     gantryBulbs.push(bulb);
   }
@@ -3222,7 +3430,7 @@ export function createScene(canvas, audioSystem = null) {
   // Checkpoint gates visual markers
   const gateMeshes = gates.map((p, i) => {
     const root = new TransformNode("checkpoint " + i, scene);
-    for (const offset of [-10, 10]) {
+    for (const offset of [-TRACK.width / 2 + 1, TRACK.width / 2 - 1]) {
       box("checkpoint post", 0.25, 3.5, 0.25, offset, 1.75, 0, lime, 0, root);
     }
     root.position.set(p.x, 0, p.z);
@@ -3268,7 +3476,7 @@ export function createScene(canvas, audioSystem = null) {
     [100, "100"],
     [50, "50"],
   ]) {
-    const p = point(200 - dist, 13);
+    const p = point(LENGTH * 0.14 - dist, TRACK.width / 2 + 2);
     sign(label, p.x, 2, p.z, 3.5, 2.2, p.yaw + Math.PI / 2, 80);
     box("board post", 0.2, 2, 0.2, p.x, 1, p.z, metal);
   }
@@ -3279,7 +3487,7 @@ export function createScene(canvas, audioSystem = null) {
     [100, "100"],
     [50, "50"],
   ]) {
-    const p = point(1080 - dist, 13);
+    const p = point(LENGTH * 0.58 - dist, TRACK.width / 2 + 2);
     sign(label, p.x, 2, p.z, 3.5, 2.2, p.yaw + Math.PI / 2, 80);
     box("board post south", 0.2, 2, 0.2, p.x, 1, p.z, metal);
   }
@@ -3320,6 +3528,7 @@ export function createScene(canvas, audioSystem = null) {
   const thinPalms = !!engine.getCaps().instancedArrays;
   const palmGroups = new Map();
   function palm(x, z, scale = 1) {
+    if (nearest(x, z).distance < TRACK.width / 2 + 7) return;
     if (thinPalms) {
       const sector =
         Math.floor(((Math.atan2(z, x) + Math.PI) * 8) / (2 * Math.PI)) % 8;
@@ -3403,23 +3612,29 @@ export function createScene(canvas, audioSystem = null) {
     baseFrond.isVisible = false;
   }
 
-  // Modern Pit Lane / Paddock complex along the main straight
-  box("pit building", 14, 8, 120, 142, 4, 20, cream);
-  box("pit roof", 16, 0.8, 124, 142, 8.4, 20, red);
-  box("pit glass", 0.1, 3.2, 100, 134.9, 5.5, 20, glass);
-  sign("PADDOCK CLUB", 134.8, 9.8, 20, 26, 3, Math.PI / 2, 70);
-
-  // Spectator Grandstands
-  for (let i = 0; i < 5; i++) {
+  // Short paddock and terraces align with this circuit's actual start straight.
+  const paddock = point(22, -(TRACK.width / 2 + 15));
+  const paddockRoot = new TransformNode("paddock complex", scene);
+  paddockRoot.position.set(paddock.x, 0, paddock.z);
+  paddockRoot.rotation.y = paddock.yaw;
+  box("pit building", 12, 6, 48, 0, 3, 0, cream, 0, paddockRoot);
+  box("pit roof", 14, 0.5, 50, 0, 6.3, 0, carbon, 0, paddockRoot);
+  box("pit glass", 0.1, 2.3, 44, 6.1, 4.2, 0, glass, 0, paddockRoot);
+  const club = sign("PADDOCK CLUB", 6.2, 7.3, 0, 22, 2.2, -Math.PI / 2, 70);
+  club.parent = paddockRoot;
+  const terrace = point(-65, TRACK.width / 2 + 20);
+  for (let i = 0; i < 4; i++) {
+    const r = point(-65, TRACK.width / 2 + 16 + i * 3);
     box(
-      "grandstand",
-      12,
-      1.5 + i * 1.2,
-      50,
-      95,
-      (1.5 + i * 1.2) / 2,
-      -70,
+      "grandstand terrace",
+      3.5,
+      1.2 + i * 1.1,
+      38,
+      r.x,
+      (1.2 + i * 1.1) / 2,
+      r.z,
       i % 2 ? cream : dark,
+      terrace.yaw,
     );
   }
 
@@ -3427,7 +3642,9 @@ export function createScene(canvas, audioSystem = null) {
   const batches = new Map();
   for (const mesh of [...scene.meshes]) {
     if (
-      mesh.parent ||
+      (mesh.parent &&
+        mesh.parent !== gantryRoot &&
+        mesh.parent !== paddockRoot) ||
       mesh.isAnInstance ||
       mesh.instances?.length ||
       mesh.thinInstanceCount ||
@@ -3441,7 +3658,13 @@ export function createScene(canvas, audioSystem = null) {
     batches.set(mesh.material, list);
   }
   for (const [mat, meshes] of batches) {
-    if (meshes.length < 2) continue;
+    if (meshes.length < 2) {
+      meshes[0]?.freezeWorldMatrix();
+      continue;
+    }
+    const castsShadow = meshes.some((m) =>
+      shadowGen?.getShadowMap()?.renderList.includes(m),
+    );
     const merged = Mesh.MergeMeshes(
       meshes,
       true,
@@ -3452,6 +3675,7 @@ export function createScene(canvas, audioSystem = null) {
     );
     if (merged) {
       merged.material = mat;
+      if (castsShadow) shadowGen.addShadowCaster(merged);
       merged.receiveShadows = true;
       merged.freezeWorldMatrix();
     }
@@ -3510,7 +3734,7 @@ export function createScene(canvas, audioSystem = null) {
   const cockpitInterior = material("cockpitInterior", "#0e1418", 0.1);
   const brakeDiscCold = material("brakeDiscCold", "#2b2f33", 0.45);
   const brakeDiscHot = material("brakeDiscHot", "#ff4500", 0.95, "#ff3300");
-  const tireStripe = material("tireStripe", "#e6382a", 0.2, "#881510");
+  const tireStripe = material("tireStripe", "#e6bc46", 0.12);
   const visorMat = material("visorGlass", "#0f171c", 0.95);
 
   function car(player) {
@@ -3554,7 +3778,7 @@ export function createScene(canvas, audioSystem = null) {
       0.02,
       1.3,
       0,
-      0.42,
+      0.35,
       1.15,
       liveryStripeMat,
       0,
@@ -3597,7 +3821,7 @@ export function createScene(canvas, audioSystem = null) {
       { width: 0.38, height: 0.38 },
       scene,
     );
-    nosePlate.position.set(0, 0.39, 1.35);
+    nosePlate.position.set(0, 0.355, 1.35);
     nosePlate.rotation.x = Math.PI / 2 - 0.25;
     nosePlate.material = numMat;
     nosePlate.parent = chassis;
@@ -3652,12 +3876,12 @@ export function createScene(canvas, audioSystem = null) {
     const body = shell(
       "monocoque",
       [
-        [-2.12, 0.88, 0.03, 0.42],
-        [-1.45, 1.04, 0.04, 0.63],
-        [-0.55, 1.01, 0.04, 0.65],
-        [0.48, 0.97, 0.04, 0.53],
-        [1.52, 0.93, 0.04, 0.39],
-        [2.08, 0.75, 0.09, 0.27],
+        [-2.12, 0.28, 0.03, 0.38],
+        [-1.45, 0.45, 0.04, 0.69],
+        [-0.55, 0.46, 0.04, 0.68],
+        [0.48, 0.39, 0.04, 0.48],
+        [1.52, 0.21, 0.07, 0.34],
+        [2.08, 0.13, 0.09, 0.23],
       ],
       paint,
     );
@@ -3707,21 +3931,55 @@ export function createScene(canvas, audioSystem = null) {
       0,
       chassis,
     );
-    shell(
-      "windscreen visor",
-      [
-        [-1.02, 0.65, 0.52, 0.79],
-        [-0.62, 0.65, 0.55, 1.05],
-        [0.18, 0.62, 0.51, 1.02],
-        [0.85, 0.64, 0.44, 0.51],
-      ],
-      glass,
-    );
+    // Open cockpit wind deflector, rather than a closed sports-car canopy.
+    box("wind deflector", 0.58, 0.08, 0.045, 0, 0.63, 0.52, glass, 0, chassis);
 
     // F1 Safety Halo
     box("halo pillar", 0.055, 0.38, 0.07, 0, 0.72, 0.48, carbon, 0, chassis);
-    box("halo arch", 0.78, 0.065, 0.74, 0, 0.91, 0.14, carbon, 0, chassis);
+    const halo = MeshBuilder.CreateTube(
+      "halo horseshoe",
+      {
+        path: Array.from({ length: 17 }, (_, i) => {
+          const a = (i / 16) * Math.PI;
+          return new Vector3(
+            Math.cos(a) * 0.39,
+            0.91,
+            Math.sin(a) * 0.56 - 0.15,
+          );
+        }),
+        radius: 0.028,
+        tessellation: 6,
+      },
+      scene,
+    );
+    halo.parent = chassis;
+    halo.material = carbon;
+    for (const side of [-1, 1])
+      box(
+        "halo rear mount",
+        0.04,
+        0.25,
+        0.05,
+        side * 0.39,
+        0.79,
+        -0.15,
+        carbon,
+        0,
+        chassis,
+      );
 
+    const steeringWheel = new TransformNode("driver steering", scene);
+    steeringWheel.parent = chassis;
+    steeringWheel.position.set(0, 0.74, 0.9);
+    const wheelRim = MeshBuilder.CreateTorus(
+      "steering rim",
+      { diameter: 0.25, thickness: 0.025, tessellation: 16 },
+      scene,
+    );
+    wheelRim.rotation.x = Math.PI / 2;
+    wheelRim.parent = steeringWheel;
+    wheelRim.material = carbon;
+    box("steering controls", 0.19, 0.07, 0.05, 0, 0, 0, dark, 0, steeringWheel);
     // 3D Driver Helmet inside cockpit
     const helmet = MeshBuilder.CreateSphere(
       "helmet",
@@ -3746,8 +4004,18 @@ export function createScene(canvas, audioSystem = null) {
     box("shark fin", 0.045, 0.46, 1.45, 0, 0.81, -0.84, carbon, 0, chassis);
 
     // 4. Sidepods, Cooling Inlets & Aero Skirts
-    for (const x of [-0.76, 0.76]) {
-      box("sidepod body", 0.44, 0.35, 1.4, x, 0.26, 0.12, paint, 0, chassis);
+    for (const x of [-0.65, 0.65]) {
+      const pod = shell(
+        "sculpted sidepod",
+        [
+          [-1.15, 0.14, 0.06, 0.22],
+          [-0.55, 0.23, 0.06, 0.46],
+          [0.4, 0.22, 0.09, 0.43],
+          [0.75, 0.16, 0.14, 0.35],
+        ],
+        paint,
+      );
+      pod.position.x = x;
       box(
         "radiator duct",
         0.36,
@@ -3903,7 +4171,7 @@ export function createScene(canvas, audioSystem = null) {
     const brakeDiscs = [];
 
     for (const x of [-1.05, 1.05]) {
-      for (const z of [-1.2, 1.2]) {
+      for (const z of [-1.35, 1.3]) {
         const pivot = new TransformNode("wheel pivot", scene);
         pivot.parent = root;
         pivot.position.set(x, -0.05, z);
@@ -3914,7 +4182,7 @@ export function createScene(canvas, audioSystem = null) {
         // Tire tread
         const wheel = MeshBuilder.CreateCylinder(
           "wheel",
-          { diameter: 0.76, height: 0.38, tessellation: 16 },
+          { diameter: 0.82, height: z < 0 ? 0.44 : 0.36, tessellation: 20 },
           scene,
         );
         wheel.rotation.z = Math.PI / 2;
@@ -3986,6 +4254,24 @@ export function createScene(canvas, audioSystem = null) {
           pivot,
         );
 
+        // Visible double wishbones connect the exposed wheels to the monocoque.
+        for (const armY of [0.04, 0.22]) {
+          const arm = MeshBuilder.CreateTube(
+            "carbon wishbone",
+            {
+              path: [
+                new Vector3(x * 0.43, armY, z - 0.3),
+                new Vector3(x, armY - 0.1, z),
+                new Vector3(x * 0.43, armY, z + 0.3),
+              ],
+              radius: 0.022,
+              tessellation: 5,
+            },
+            scene,
+          );
+          arm.parent = chassis;
+          arm.material = carbon;
+        }
         wheels.push({ pivot, wheel: axle, front: z > 0 });
       }
     }
@@ -3995,6 +4281,8 @@ export function createScene(canvas, audioSystem = null) {
       const groups = new Map();
       for (const mesh of parent.getChildMeshes(true)) {
         if (
+          mesh === helmet ||
+          mesh === helmetVisor ||
           !mesh.isEnabled() ||
           brakeLights.includes(mesh) ||
           brakeDiscs.includes(mesh)
@@ -4034,6 +4322,8 @@ export function createScene(canvas, audioSystem = null) {
     const result = {
       root,
       chassis,
+      cockpitOccluders: [helmet, helmetVisor],
+      steeringWheel,
       wheels,
       label,
       posEl,
@@ -4147,7 +4437,7 @@ export function createScene(canvas, audioSystem = null) {
               right: t.steer > 0.1,
               drift: t.drift,
             };
-          predict(motion, command, Math.min(1 / 60, horizon - elapsed));
+          predict(motion, command, Math.min(1 / 60, horizon - elapsed), track);
         }
         if (c.prediction) {
           const age = Math.min(
@@ -4241,6 +4531,8 @@ export function createScene(canvas, audioSystem = null) {
   const identityMatrix = Matrix.Identity();
   const lookSpring = camera.getTarget().clone();
   const cameraDesired = new Vector3();
+  const previousCameraAnchor = new Vector3();
+  let cameraAnchorReady = false;
   const cameraLook = new Vector3();
   const cameraOrbit = new Vector3();
   const listenerForward = new Vector3();
@@ -4444,7 +4736,7 @@ export function createScene(canvas, audioSystem = null) {
           const age = Math.min(0.05, Math.max(0, (now - c.predictedAt) / 1000));
           let remaining = age;
           while (remaining >= 1 / 60) {
-            predict(c.prediction, localInput, 1 / 60);
+            predict(c.prediction, localInput, 1 / 60, track);
             remaining -= 1 / 60;
           }
           c.predictedAt = now - remaining * 1000;
@@ -4644,7 +4936,9 @@ export function createScene(canvas, audioSystem = null) {
 
         // Authentic kerb chassis micro-vibration
         const trackDist = nearest(targetPosX, targetPosZ).distance;
-        const onKerbZone = trackDist >= 9.8 && trackDist <= 11.6;
+        const onKerbZone =
+          trackDist >= TRACK.width / 2 - 1.2 &&
+          trackDist <= TRACK.width / 2 + 0.6;
         if (onKerbZone && (t.speed || 0) > 7) {
           c.chassis.position.y =
             -0.32 +
@@ -4654,12 +4948,14 @@ export function createScene(canvas, audioSystem = null) {
           c.chassis.position.y += (-0.32 - c.chassis.position.y) * alpha;
         }
 
+        c.steeringWheel.rotation.z +=
+          (-visualSteer * 0.65 - c.steeringWheel.rotation.z) * alpha;
         // Wheel spinning & Ackermann steering geometry
         for (const w of c.wheels) {
           const forwardSpeed =
             (t.vx || 0) * Math.sin(t.yaw) + (t.vz || 0) * Math.cos(t.yaw);
           w.wheel.rotation.x =
-            (w.wheel.rotation.x + (forwardSpeed * dt) / 0.38) % (Math.PI * 2);
+            (w.wheel.rotation.x + (forwardSpeed * dt) / 0.41) % (Math.PI * 2);
           const steerTarget = w.front ? visualSteer * 0.34 : 0;
           w.pivot.rotation.y += (steerTarget - w.pivot.rotation.y) * alpha;
           const compression = Math.max(
@@ -4728,7 +5024,11 @@ export function createScene(canvas, audioSystem = null) {
             ? Math.max(0, mine.target.speed)
             : 0;
 
-        // Smooth chase camera distance and height inspired by the solid 1fc22f6 feel
+        cameraTransition = Math.min(1, cameraTransition + dt / 0.65);
+        for (const c of cars.values())
+          for (const mesh of c.cockpitOccluders)
+            mesh.isVisible = !(c === mine && cameraMode === "cockpit");
+        // Chase keeps the full car readable; cockpit follows the driver exactly once settled.
         const camDist = 8.9 + Math.min(2.4, speed * 0.045);
         const camHeight = 3.5 + Math.min(0.9, speed * 0.018);
 
@@ -4745,11 +5045,37 @@ export function createScene(canvas, audioSystem = null) {
 
         const prevCamX = camera.position.x;
         const prevCamZ = camera.position.z;
-
+        if (cameraMode === "cockpit" && cameraAnchorReady) {
+          const dx = p.x - previousCameraAnchor.x,
+            dy = p.y - previousCameraAnchor.y,
+            dz = p.z - previousCameraAnchor.z;
+          camera.position.x += dx;
+          camera.position.y += dy;
+          camera.position.z += dz;
+          lookSpring.x += dx;
+          lookSpring.y += dy;
+          lookSpring.z += dz;
+        }
+        previousCameraAnchor.copyFrom(p);
+        cameraAnchorReady = true;
+        if (cameraMode === "cockpit")
+          cameraDesired.set(
+            px + Math.sin(safeYaw) * 0.24,
+            py + 0.82 + Math.pow(1 - cameraTransition, 2) * 2,
+            pz + Math.cos(safeYaw) * 0.24,
+          );
+        if (cameraMode === "overhead")
+          cameraDesired.set(
+            px - Math.sin(safeYaw) * 10,
+            py + 27,
+            pz - Math.cos(safeYaw) * 10,
+          );
         Vector3.LerpToRef(
           camera.position,
           cameraDesired,
-          1 - Math.exp(-8 * dt),
+          cameraMode === "cockpit" && cameraTransition === 1
+            ? 1
+            : 1 - Math.exp(-(cameraMode === "overhead" ? 6 : 12) * dt),
           camera.position,
         );
 
@@ -4772,35 +5098,62 @@ export function createScene(canvas, audioSystem = null) {
           py + 1.25,
           pz + Math.cos(safeYaw) * lookDist,
         );
+        if (cameraMode === "cockpit")
+          cameraLook.set(
+            px + Math.sin(safeYaw) * 45,
+            py + 0.82,
+            pz + Math.cos(safeYaw) * 45,
+          );
+        if (cameraMode === "overhead")
+          cameraLook.set(
+            px + Math.sin(safeYaw) * 6,
+            py,
+            pz + Math.cos(safeYaw) * 6,
+          );
         if (Vector3.DistanceSquared(camera.position, cameraLook) > 0.01) {
           Vector3.LerpToRef(
             lookSpring,
             cameraLook,
-            1 - Math.exp(-10 * dt),
+            cameraMode === "cockpit" && cameraTransition === 1
+              ? 1
+              : 1 - Math.exp(-12 * dt),
             lookSpring,
           );
           camera.setTarget(lookSpring);
         }
 
         // Speed FOV expansion (intense tunnel vision at top speed, clamped safely)
-        const targetFov = 0.82 + Math.min(0.12, (speed / 50) * 0.12);
+        const targetFov =
+          cameraMode === "overhead"
+            ? 0.76
+            : cameraMode === "cockpit"
+              ? 0.94
+              : 0.82 + Math.min(0.1, (speed / 50) * 0.1);
         camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-6 * dt));
         camera.fov = Math.max(
           0.7,
           Math.min(0.98, Number.isFinite(camera.fov) ? camera.fov : 0.82),
         );
       } else {
+        for (const c of cars.values())
+          for (const mesh of c.cockpitOccluders) mesh.isVisible = true;
+        cameraAnchorReady = false;
         // Cinematic orbit in lobby / results
         const t = now * 0.00015;
         camera.fov += (0.82 - camera.fov) * (1 - Math.exp(-4 * dt));
-        cameraOrbit.set(120 + Math.sin(t) * 75, 55, Math.cos(t) * 75);
+        const focus = point(0);
+        cameraOrbit.set(
+          focus.x + Math.sin(t) * 75,
+          55,
+          focus.z + Math.cos(t) * 75,
+        );
         Vector3.LerpToRef(
           camera.position,
           cameraOrbit,
           1 - Math.exp(-2 * dt),
           camera.position,
         );
-        cameraLook.set(120, 2, 0);
+        cameraLook.set(focus.x, 2, focus.z);
         Vector3.LerpToRef(
           lookSpring,
           cameraLook,
@@ -4918,11 +5271,36 @@ export function createScene(canvas, audioSystem = null) {
 
   return {
     update,
+    camera: (mode) => {
+      if (
+        ["chase", "cockpit", "overhead"].includes(mode) &&
+        mode !== cameraMode
+      ) {
+        cameraMode = mode;
+        cameraTransition = 0;
+        cameraAnchorReady = false;
+      }
+    },
     metrics: () => {
       const values = Array.from(
         frameTimes.slice(0, Math.min(frameCount, 360)),
       ).sort((a, b) => a - b);
       return {
+        cameraMode,
+        trackId: track.id,
+        camera: {
+          position: {
+            x: camera.position.x,
+            y: camera.position.y,
+            z: camera.position.z,
+          },
+          target: {
+            x: camera.getTarget().x,
+            y: camera.getTarget().y,
+            z: camera.getTarget().z,
+          },
+          fov: camera.fov,
+        },
         frames: frameCount,
         failedFrames,
         meanFrameMs:
@@ -4937,6 +5315,7 @@ export function createScene(canvas, audioSystem = null) {
         interpolationMs: smoothInterpDelay,
         quality: qualityLevel,
         resolution,
+        shadowMapSize: shadowGen?.mapSize || 0,
         poses: [...cars.values()].map((c) => ({
           id: c.root.name,
           x: c.root.position.x,
@@ -4969,6 +5348,8 @@ export function createScene(canvas, audioSystem = null) {
       qualityElapsed = qualitySum = qualityFrames = 0;
       engine.setHardwareScalingLevel(resolution);
       if (shadowGen) {
+        const shadowSize = level < 2 ? 512 : 1024;
+        if (shadowGen.mapSize !== shadowSize) shadowGen.mapSize = shadowSize;
         if (level === 0) {
           scene.shadowsEnabled = false;
         } else if (level === 1) {
@@ -5879,6 +6260,51 @@ footer,
   }
   .hud-top {
     top: 90px;
+  }
+}
+
+/* The camera control stays reachable without crowding the race HUD. */
+.top-right {
+  gap: 8px;
+}
+@media (max-width: 900px) {
+  header {
+    padding: 16px 20px;
+  }
+  .brand small {
+    display: none;
+  }
+  .top-right {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 440px;
+  }
+}
+@media (max-width: 700px) {
+  header {
+    align-items: flex-start;
+    padding: 12px;
+  }
+  .top-right {
+    width: 62vw;
+    max-width: 290px;
+    gap: 5px;
+  }
+  .top-right .small {
+    padding: 7px 8px;
+    font-size: 9px;
+  }
+  .hud-top {
+    top: 124px;
+  }
+  .audio-panel {
+    top: 124px;
+  }
+}
+
+@media (max-width: 700px) {
+  #leaderboard {
+    top: 205px;
   }
 }
 ```
@@ -8800,7 +9226,7 @@ try {
   await p1.waitForFunction(() => window.__getState()?.phase === "racing");
   await p2.waitForFunction(() => window.__getState()?.phase === "racing");
 
-  console.log("TEST 1: Accelerating to Maximum Speed (> 140 km/h)...");
+  console.log("TEST 1: Accelerating above 120 km/h...");
   await p2.bringToFront();
   await p2.evaluate(() => window.focus());
   await p2.keyboard.down("w");
@@ -8873,12 +9299,17 @@ try {
   console.log("TEST 3: Intentional Car-to-Car Collisions...");
   // Ram Driver 1 into Driver 2
   const [carA, carB] = [...room.race.cars.values()];
-  carA.b.position.set(120, 0.55, 60);
-  carA.yaw = 0;
-  carA.b.velocity.set(0, 0, 45);
-  carB.b.position.set(120, 0.55, 64);
-  carB.yaw = Math.PI;
-  carB.b.velocity.set(0, 0, -45);
+  for (const [car, s, reverse] of [
+    [carA, 60, false],
+    [carB, 64, true],
+  ]) {
+    const p = room.race.track.point(s);
+    car.b.position.set(p.x, 0.55, p.z);
+    car.yaw = p.yaw + (reverse ? Math.PI : 0);
+    car.b.quaternion.setFromEuler(0, car.yaw, 0);
+    car.b.velocity.set(Math.sin(car.yaw) * 45, 0, Math.cos(car.yaw) * 45);
+    car.previous = { x: p.x, z: p.z };
+  }
 
   for (let i = 0; i < 30; i++) {
     room.race.step(1 / 60, Date.now(), true, room.startAt);
@@ -9197,7 +9628,7 @@ import { randomBytes, randomInt } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
 import { Race } from "./race.js";
-import { TRACK } from "../shared/track.js";
+import { TRACKS } from "../shared/track.js";
 export async function createGame({ dev = false } = {}) {
   const RECONNECT_GRACE_MS = 30000;
   const app = express(),
@@ -9222,7 +9653,12 @@ export async function createGame({ dev = false } = {}) {
     "#c999ff",
     "#ff9c45",
   ];
+  const selectTrack = (previous) => {
+    const choices = TRACKS.filter((track) => track.id !== previous);
+    return choices[randomInt(choices.length)].id;
+  };
   const state = (r) => ({
+    trackId: r.race.track.id,
     seq: (r.stateSeq = (r.stateSeq || 0) + 1),
     raceId: r.raceId || 0,
     code: r.code,
@@ -9386,7 +9822,7 @@ export async function createGame({ dev = false } = {}) {
           players: new Map(),
           tokens: new Map(),
           pending: new Map(),
-          race: new Race(),
+          race: new Race(selectTrack()),
           startAt: 0,
           endAt: 0,
         };
@@ -9421,7 +9857,7 @@ export async function createGame({ dev = false } = {}) {
       if (r.phase !== "lobby") throw Error("Race is already in progress.");
       if (r.pending.size)
         throw Error("Wait for reconnecting racers before starting.");
-      r.race = new Race();
+      r.race = new Race(r.race.track.id);
       r.raceId = (r.raceId || 0) + 1;
       [...r.players.keys()].forEach((id, i) => r.race.add(id, i));
       r.phase = "countdown";
@@ -9436,7 +9872,7 @@ export async function createGame({ dev = false } = {}) {
       r.phase = "lobby";
       r.startAt = 0;
       r.endAt = 0;
-      r.race = new Race();
+      r.race = new Race(selectTrack(r.race.track.id));
       [...r.players.keys()].forEach((id, i) => r.race.add(id, i));
       broadcast(r);
     });
@@ -9551,12 +9987,13 @@ Exact workspace path: `C:/Users/jadav/Coding/car racing game/server/race.js`
 ```
 import { drive } from "../shared/driving.js";
 import * as C from "cannon-es";
-import { TRACK, LENGTH, point, nearest, gates } from "../shared/track.js";
+import { getTrack } from "../shared/track.js";
 
 import { CAR_HALF_WIDTH, CAR_HALF_LENGTH, overlap } from "../shared/contact.js";
 
 export class Race {
-  constructor() {
+  constructor(trackId = "palm") {
+    this.track = getTrack(trackId);
     this.world = new C.World({ gravity: new C.Vec3(0, -18, 0) });
     this.world.defaultContactMaterial.friction = 0;
     this.world.defaultContactMaterial.restitution = 0.06;
@@ -9565,16 +10002,20 @@ export class Race {
     const ground = new C.Body({ mass: 0, shape: new C.Plane() });
     ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
     this.world.addBody(ground);
-    for (let i = 0; i < TRACK.segments; i++)
+    for (let i = 0; i < this.track.segments; i++)
       for (const side of [-1, 1]) {
-        const p = point(
-          ((i + 0.5) * LENGTH) / TRACK.segments,
-          side * (TRACK.width / 2 + 0.5),
+        const p = this.track.point(
+          ((i + 0.5) * this.track.length) / this.track.segments,
+          side * (this.track.width / 2 + 0.5),
         );
         const b = new C.Body({
           mass: 0,
           shape: new C.Box(
-            new C.Vec3(0.5, 1.2, (LENGTH / TRACK.segments) * 0.57),
+            new C.Vec3(
+              0.5,
+              1.2,
+              (this.track.length / this.track.segments) * 0.57,
+            ),
           ),
           position: new C.Vec3(p.x, 1, p.z),
         });
@@ -9629,12 +10070,14 @@ export class Race {
     this.cars.delete(id);
   }
   reset(c, grid = false, index = 0) {
-    const s = grid ? -8 - Math.floor(index / 2) * 7 : (c.passed * LENGTH) / 24;
-    let p = point(s, grid ? (index % 2 ? 3 : -3) : 0);
+    const s = grid
+      ? -8 - Math.floor(index / 2) * 7
+      : (c.passed * this.track.length) / 24;
+    let p = this.track.point(s, grid ? (index % 2 ? 3 : -3) : 0);
     let free = false;
     for (let back = 0; back <= 60 && !free; back += 6) {
       for (const lane of [grid ? (index % 2 ? 3 : -3) : 0, -4, 4, -7, 7]) {
-        const candidate = point(s - back, lane);
+        const candidate = this.track.point(s - back, lane);
         if (
           [...this.cars.values()].every(
             (other) =>
@@ -9710,7 +10153,7 @@ export class Race {
         vx: c.b.velocity.x,
         vz: c.b.velocity.z,
       };
-      drive(motion, input, safeDt, running && !c.finished);
+      drive(motion, input, safeDt, running && !c.finished, this.track);
       c.yaw = motion.yaw;
       c.steer = motion.steer;
       c.b.velocity.x = motion.vx;
@@ -9765,7 +10208,9 @@ export class Race {
     }
 
     // 2. Iterative non-penetration position relaxation and barrier containment
-    for (let pass = 0; pass < 8; pass++) {
+    // One car cannot be pushed back into another by containment, so solo
+    // driving needs only one relaxation pass. Multiplayer keeps eight.
+    for (let pass = 0; pass < (bodies.length > 1 ? 8 : 1); pass++) {
       for (let i = 0; i < bodies.length; i++) {
         for (let j = i + 1; j < bodies.length; j++) {
           const a = bodies[i],
@@ -9786,8 +10231,8 @@ export class Race {
       }
       // Project against road edge inside relaxation
       for (const c of bodies) {
-        const near = nearest(c.b.position.x, c.b.position.z);
-        const frame = point(near.s);
+        const near = this.track.nearest(c.b.position.x, c.b.position.z);
+        const frame = this.track.point(near.s);
         const nx = Math.cos(frame.yaw),
           nz = -Math.sin(frame.yaw);
         const offset =
@@ -9796,7 +10241,7 @@ export class Race {
         const extent =
           CAR_HALF_WIDTH * Math.abs(Math.cos(relative)) +
           CAR_HALF_LENGTH * Math.abs(Math.sin(relative));
-        const limit = TRACK.width / 2 - extent - 0.02;
+        const limit = this.track.width / 2 - extent - 0.02;
         if (Math.abs(offset) > limit) {
           const excess = offset - Math.sign(offset) * limit;
           c.b.position.x -= nx * excess;
@@ -9855,12 +10300,12 @@ export class Race {
         c.b.velocity.z = (c.b.velocity.z / currentSpeed) * 52;
       }
 
-      const near = nearest(c.b.position.x, c.b.position.z);
+      const near = this.track.nearest(c.b.position.x, c.b.position.z);
       // At low speed the tires cannot steer a nose pressed into a barrier.
       // Help the car face back onto the road while throttle is held, so a
       // contact does not leave it grinding against the wall indefinitely.
       if (running && !c.finished && c.controls?.up && currentSpeed < 9) {
-        const frame = point(near.s);
+        const frame = this.track.point(near.s);
         const side =
           (c.b.position.x - frame.x) * Math.cos(frame.yaw) -
           (c.b.position.z - frame.z) * Math.sin(frame.yaw);
@@ -9868,7 +10313,7 @@ export class Race {
         const extent =
           CAR_HALF_WIDTH * Math.abs(Math.cos(relativeYaw)) +
           CAR_HALF_LENGTH * Math.abs(Math.sin(relativeYaw));
-        const limit = TRACK.width / 2 - extent;
+        const limit = this.track.width / 2 - extent;
         const outward = Math.sin(relativeYaw) * Math.sign(side);
         if (Math.abs(side) > limit - 0.25 && outward > 0.12) {
           const desiredYaw = frame.yaw - Math.sign(side) * 0.24;
@@ -9895,7 +10340,7 @@ export class Race {
   progress(c, now, startAt, dt = 0) {
     const safeDt = Math.min(0.05, Math.max(0, Number.isFinite(dt) ? dt : 0));
     const next = (c.passed + 1) % 24,
-      g = gates[next],
+      g = this.track.gates[next],
       p = c.b.position,
       old = c.previous;
     const before =
@@ -9904,9 +10349,9 @@ export class Race {
     const across = Math.abs(
       (p.x - g.x) * Math.cos(g.yaw) - (p.z - g.z) * Math.sin(g.yaw),
     );
-    if (before <= 0 && after > 0 && across < TRACK.width / 2 + 2) {
+    if (before <= 0 && after > 0 && across < this.track.width / 2 + 2) {
       c.passed++;
-      if (c.passed === 24 * TRACK.laps) {
+      if (c.passed === 24 * this.track.laps) {
         const denom = after - before;
         const frac =
           Math.abs(denom) > 1e-4
@@ -9944,14 +10389,14 @@ export class Race {
           0.99,
           Math.max(
             -1,
-            (((((nearest(c.b.position.x, c.b.position.z).s -
-              ((c.passed % 24) * LENGTH) / 24 +
-              LENGTH / 2) %
-              LENGTH) +
-              LENGTH) %
-              LENGTH) -
-              LENGTH / 2) /
-              (LENGTH / 24),
+            (((((this.track.nearest(c.b.position.x, c.b.position.z).s -
+              ((c.passed % 24) * this.track.length) / 24 +
+              this.track.length / 2) %
+              this.track.length) +
+              this.track.length) %
+              this.track.length) -
+              this.track.length / 2) /
+              (this.track.length / 24),
           ),
         ),
     }));
@@ -10002,9 +10447,9 @@ export function overlap(a, b, padding = 0) {
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/shared/driving.js`
 
 ```
-import { TRACK, nearest } from "./track.js";
+import { getTrack } from "./track.js";
 // Shared kinematic controller: authoritative server and bounded client prediction.
-export function drive(c, input, dt, active = true) {
+export function drive(c, input, dt, active = true, track = getTrack()) {
   if (!Number.isFinite(dt) || dt <= 0) return;
   dt = Math.min(dt, 1 / 30);
   input = active ? input || {} : {};
@@ -10063,8 +10508,8 @@ export function drive(c, input, dt, active = true) {
 
   // Off-road grass friction (slight drag outside the asphalt road)
   if (Number.isFinite(c.x) && Number.isFinite(c.z)) {
-    const distFromCenter = nearest(c.x, c.z).distance;
-    if (distFromCenter > TRACK.width / 2) {
+    const distFromCenter = track.nearest(c.x, c.z).distance;
+    if (distFromCenter > track.width / 2) {
       speed *= Math.exp(-1.4 * dt);
     }
   }
@@ -10075,7 +10520,7 @@ export function drive(c, input, dt, active = true) {
   c.vx = Number.isFinite(v.x) ? v.x : 0;
   c.vz = Number.isFinite(v.z) ? v.z : 0;
 }
-export function predict(c, input, dt) {
+export function predict(c, input, dt, track = getTrack()) {
   if (
     !Number.isFinite(dt) ||
     dt <= 0 ||
@@ -10084,7 +10529,7 @@ export function predict(c, input, dt) {
   )
     return;
   dt = Math.min(dt, 1 / 30);
-  drive(c, input, dt);
+  drive(c, input, dt, true, track);
   if (Number.isFinite(c.vx) && Number.isFinite(c.vz)) {
     c.x += c.vx * dt;
     c.z += c.vz * dt;
@@ -10097,10 +10542,13 @@ export function predict(c, input, dt) {
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/shared/protocol.js`
 
 ```
+import { TRACKS } from "./track.js";
+const trackIds = new Set(TRACKS.map((track) => track.id));
 // Validate the complete snapshot at the network boundary, before UI/audio/3D see it.
 export function validSnapshot(s) {
   if (
     !s ||
+    !trackIds.has(s.trackId) ||
     !["lobby", "countdown", "racing", "results"].includes(s.phase) ||
     typeof s.code !== "string" ||
     !/^[A-Z2-9]{5}$/.test(s.code) ||
@@ -10183,205 +10631,189 @@ export function validSnapshot(s) {
 Exact workspace path: `C:/Users/jadav/Coding/car racing game/shared/track.js`
 
 ```
-export const TRACK = {
-  name: "Palm Circuit",
-  width: 22,
-  laps: 3,
-  maxPlayers: 6,
-  segments: 180,
-};
-
-// Grand Prix style flowing elliptical circuit:
-// Long main straight, high-speed sweeping North & South carousels,
-// gentle flowing left/right transitions, wide run-offs, and no sudden sharp kinks.
-const knots = [
-  { x: 120, z: -140 }, // [0] Final bend exit onto main straight
-  { x: 120, z: 0 }, // [1] Start / Finish line (s = 0, yaw = 0)
-  { x: 120, z: 120 }, // [2] Main straight mid
-  { x: 120, z: 210 }, // [3] Main straight braking zone
-  { x: 92, z: 290 }, // [4] Turn 1: sweeping left-into-turn entry
-  { x: 20, z: 340 }, // [5] Turn 2: North sweeper apex (large radius)
-  { x: -65, z: 335 }, // [6] Turn 2: North sweeper exit
-  { x: -135, z: 270 }, // [7] Turn 3: High speed sweep to back stretch
-  { x: -150, z: 160 }, // [8] Back stretch entry
-  { x: -110, z: 45 }, // [9] Gentle flowing right bend
-  { x: -95, z: -55 }, // [10] Apex of gentle right sweeper
-  { x: -135, z: -155 }, // [11] Sweeping left transition
-  { x: -160, z: -230 }, // [12] South sweeper entry
-  { x: -105, z: -320 }, // [13] South carousel apex (large radius)
-  { x: 5, z: -330 }, // [14] South curve exit
-  { x: 95, z: -255 }, // [15] Final wide bend entry
+// Each room owns a circuit; there is no mutable global active-track state.
+const definitions = [
+  { id: "palm", name: "Palm Grand Prix", rx: 120, rz: 330, sway: 0, width: 24 },
+  { id: "azure", name: "Azure Coast", rx: 165, rz: 300, sway: 18, width: 25 },
+  { id: "ember", name: "Ember Valley", rx: 145, rz: 380, sway: -16, width: 26 },
+  {
+    id: "aurora",
+    name: "Aurora Speedway",
+    rx: 195,
+    rz: 260,
+    sway: 12,
+    width: 26,
+  },
 ];
-
-const N = knots.length;
-
-function getRawPoint(t) {
-  t = ((t % N) + N) % N;
-  const i = Math.floor(t);
-  const u = t - i;
-  const p0 = knots[(i - 1 + N) % N];
-  const p1 = knots[i];
-  const p2 = knots[(i + 1) % N];
-  const p3 = knots[(i + 2) % N];
-  const u2 = u * u;
-  const u3 = u2 * u;
-
-  const x =
-    0.5 *
-    (2 * p1.x +
-      (-p0.x + p2.x) * u +
-      (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * u2 +
-      (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * u3);
-
-  const z =
-    0.5 *
-    (2 * p1.z +
-      (-p0.z + p2.z) * u +
-      (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * u2 +
-      (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * u3);
-
-  const dx =
-    0.5 *
-    (-p0.x +
-      p2.x +
-      2 * (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * u +
-      3 * (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * u2);
-
-  const dz =
-    0.5 *
-    (-p0.z +
-      p2.z +
-      2 * (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * u +
-      3 * (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * u2);
-
-  const yaw = Math.atan2(dx, dz);
-  return { x, z, yaw };
-}
-
-// Pre-sample finely starting from t = 1 (where x = 120, z = 0, yaw = 0)
-const SAMPLES = 2000;
-const rawSamples = [];
-for (let i = 0; i <= SAMPLES; i++) {
-  const t = 1 + (i * N) / SAMPLES;
-  rawSamples.push(getRawPoint(t));
-}
-
-const rawLengths = [0];
-for (let i = 1; i < rawSamples.length; i++) {
-  rawLengths.push(
-    rawLengths[i - 1] +
-      Math.hypot(
-        rawSamples[i].x - rawSamples[i - 1].x,
-        rawSamples[i].z - rawSamples[i - 1].z,
-      ),
-  );
-}
-const TOTAL_LENGTH = rawLengths.at(-1);
-
-// Generate uniform arc-length equidistant lookup samples
-const UNIFORM_COUNT = 1600;
-const samples = [];
-for (let i = 0; i <= UNIFORM_COUNT; i++) {
-  const targetS = (i * TOTAL_LENGTH) / UNIFORM_COUNT;
-  let lo = 0,
-    hi = rawLengths.length - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (rawLengths[mid] <= targetS) lo = mid;
-    else hi = mid;
+function buildTrack(config) {
+  const { rx, rz, sway } = config;
+  // Analytic closed curves have continuous tangents and curvature at the seam.
+  // Gentle lateral shaping creates distinct flowing ovals without angular turns.
+  function getRawPoint(t) {
+    const x = rx * Math.cos(t) + sway * (Math.cos(2 * t) - 1);
+    const z = rz * Math.sin(t);
+    const dx = -rx * Math.sin(t) - 2 * sway * Math.sin(2 * t);
+    const dz = rz * Math.cos(t);
+    return { x, z, yaw: Math.atan2(dx, dz) };
   }
-  const a = rawSamples[lo],
-    b = rawSamples[hi];
-  const t = (targetS - rawLengths[lo]) / (rawLengths[hi] - rawLengths[lo] || 1);
-  const delta = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw));
-  samples.push({
-    x: a.x + (b.x - a.x) * t,
-    z: a.z + (b.z - a.z) * t,
-    yaw: a.yaw + delta * t,
-  });
-}
-
-const lengths = [0];
-for (let i = 1; i < samples.length; i++) {
-  lengths.push(
-    lengths[i - 1] +
-      Math.hypot(
-        samples[i].x - samples[i - 1].x,
-        samples[i].z - samples[i - 1].z,
-      ),
-  );
-}
-
-export const LENGTH = lengths.at(-1);
-
-export function point(s, offset = 0) {
-  s = ((s % LENGTH) + LENGTH) % LENGTH;
-  let lo = 0,
-    hi = lengths.length - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (lengths[mid] <= s) lo = mid;
-    else hi = mid;
+  // Arc-length lookup keeps geometry, checkpoints and barrier spacing consistent.
+  const SAMPLES = 2000;
+  const rawSamples = [];
+  for (let i = 0; i <= SAMPLES; i++) {
+    const t = (i * Math.PI * 2) / SAMPLES;
+    rawSamples.push(getRawPoint(t));
   }
-  const a = samples[lo],
-    b = samples[hi],
-    t = (s - lengths[lo]) / (lengths[hi] - lengths[lo] || 1);
-  const delta = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw)),
-    yaw = a.yaw + delta * t;
-  return {
-    x: a.x + (b.x - a.x) * t + Math.cos(yaw) * offset,
-    z: a.z + (b.z - a.z) * t - Math.sin(yaw) * offset,
-    yaw,
-  };
-}
 
-// Exact spatial rejection: skip segment blocks whose bounds cannot beat the best hit.
-const blocks = [];
-for (let start = 0; start < samples.length - 1; start += 24) {
-  const end = Math.min(samples.length - 1, start + 24);
-  let minX = Infinity,
-    maxX = -Infinity,
-    minZ = Infinity,
-    maxZ = -Infinity;
-  for (let i = start; i <= end; i++) {
-    const p = samples[i];
-    minX = Math.min(minX, p.x);
-    maxX = Math.max(maxX, p.x);
-    minZ = Math.min(minZ, p.z);
-    maxZ = Math.max(maxZ, p.z);
+  const rawLengths = [0];
+  for (let i = 1; i < rawSamples.length; i++) {
+    rawLengths.push(
+      rawLengths[i - 1] +
+        Math.hypot(
+          rawSamples[i].x - rawSamples[i - 1].x,
+          rawSamples[i].z - rawSamples[i - 1].z,
+        ),
+    );
   }
-  blocks.push({ start, end, minX, maxX, minZ, maxZ });
-}
-export function nearest(x, z) {
-  let best = Infinity,
-    s = 0;
-  for (const block of blocks) {
-    const bx = Math.max(block.minX - x, 0, x - block.maxX),
-      bz = Math.max(block.minZ - z, 0, z - block.maxZ);
-    if (bx * bx + bz * bz > best) continue;
-    for (let i = block.start; i < block.end; i++) {
-      const a = samples[i],
-        b = samples[i + 1],
-        dx = b.x - a.x,
-        dz = b.z - a.z;
-      const lenSq = dx * dx + dz * dz;
-      const t =
-        lenSq > 0
-          ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / lenSq))
-          : 0;
-      const distance = (x - a.x - dx * t) ** 2 + (z - a.z - dz * t) ** 2;
-      if (distance < best) {
-        best = distance;
-        s = lengths[i] + t * (lengths[i + 1] - lengths[i]);
+  const TOTAL_LENGTH = rawLengths.at(-1);
+
+  // Generate uniform arc-length equidistant lookup samples
+  const UNIFORM_COUNT = 1600;
+  const samples = [];
+  for (let i = 0; i <= UNIFORM_COUNT; i++) {
+    const targetS = (i * TOTAL_LENGTH) / UNIFORM_COUNT;
+    let lo = 0,
+      hi = rawLengths.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (rawLengths[mid] <= targetS) lo = mid;
+      else hi = mid;
+    }
+    const a = rawSamples[lo],
+      b = rawSamples[hi];
+    const t =
+      (targetS - rawLengths[lo]) / (rawLengths[hi] - rawLengths[lo] || 1);
+    const delta = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw));
+    samples.push({
+      x: a.x + (b.x - a.x) * t,
+      z: a.z + (b.z - a.z) * t,
+      yaw: a.yaw + delta * t,
+    });
+  }
+
+  const lengths = [0];
+  for (let i = 1; i < samples.length; i++) {
+    lengths.push(
+      lengths[i - 1] +
+        Math.hypot(
+          samples[i].x - samples[i - 1].x,
+          samples[i].z - samples[i - 1].z,
+        ),
+    );
+  }
+
+  const LENGTH = lengths.at(-1);
+
+  function point(s, offset = 0) {
+    s = ((s % LENGTH) + LENGTH) % LENGTH;
+    let lo = 0,
+      hi = lengths.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (lengths[mid] <= s) lo = mid;
+      else hi = mid;
+    }
+    const a = samples[lo],
+      b = samples[hi],
+      t = (s - lengths[lo]) / (lengths[hi] - lengths[lo] || 1);
+    const delta = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw)),
+      yaw = a.yaw + delta * t;
+    return {
+      x: a.x + (b.x - a.x) * t + Math.cos(yaw) * offset,
+      z: a.z + (b.z - a.z) * t - Math.sin(yaw) * offset,
+      yaw,
+    };
+  }
+
+  // Exact spatial rejection: skip segment blocks whose bounds cannot beat the best hit.
+  const blocks = [];
+  for (let start = 0; start < samples.length - 1; start += 24) {
+    const end = Math.min(samples.length - 1, start + 24);
+    let minX = Infinity,
+      maxX = -Infinity,
+      minZ = Infinity,
+      maxZ = -Infinity;
+    for (let i = start; i <= end; i++) {
+      const p = samples[i];
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minZ = Math.min(minZ, p.z);
+      maxZ = Math.max(maxZ, p.z);
+    }
+    blocks.push({ start, end, minX, maxX, minZ, maxZ });
+  }
+  function nearest(x, z) {
+    let best = Infinity,
+      s = 0;
+    for (const block of blocks) {
+      const bx = Math.max(block.minX - x, 0, x - block.maxX),
+        bz = Math.max(block.minZ - z, 0, z - block.maxZ);
+      if (bx * bx + bz * bz > best) continue;
+      for (let i = block.start; i < block.end; i++) {
+        const a = samples[i],
+          b = samples[i + 1],
+          dx = b.x - a.x,
+          dz = b.z - a.z;
+        const lenSq = dx * dx + dz * dz;
+        const t =
+          lenSq > 0
+            ? Math.max(
+                0,
+                Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / lenSq),
+              )
+            : 0;
+        const distance = (x - a.x - dx * t) ** 2 + (z - a.z - dz * t) ** 2;
+        if (distance < best) {
+          best = distance;
+          s = lengths[i] + t * (lengths[i + 1] - lengths[i]);
+        }
       }
     }
+    return { s: s % LENGTH, distance: Math.sqrt(best) };
   }
-  return { s: s % LENGTH, distance: Math.sqrt(best) };
-}
 
-export const gates = Array.from({ length: 24 }, (_, i) =>
-  point((i * LENGTH) / 24),
-);
+  const gates = Array.from({ length: 24 }, (_, i) => point((i * LENGTH) / 24));
+
+  const padding = config.width / 2 + 15;
+  const bounds = Object.freeze({
+    minX: Math.min(...samples.map((p) => p.x)) - padding,
+    maxX: Math.max(...samples.map((p) => p.x)) + padding,
+    minZ: Math.min(...samples.map((p) => p.z)) - padding,
+    maxZ: Math.max(...samples.map((p) => p.z)) + padding,
+  });
+  return Object.freeze({
+    id: config.id,
+    name: config.name,
+    width: config.width,
+    laps: 3,
+    maxPlayers: 6,
+    segments: 240,
+    length: LENGTH,
+    point,
+    nearest,
+    gates: Object.freeze(gates.map(Object.freeze)),
+    bounds,
+  });
+}
+export const TRACKS = Object.freeze(definitions.map(buildTrack));
+export function getTrack(id = "palm") {
+  return TRACKS.find((track) => track.id === id) || TRACKS[0];
+}
+// Compatibility exports are permanently bound to the default circuit.
+export const TRACK = TRACKS[0];
+export const LENGTH = TRACK.length;
+export const point = TRACK.point;
+export const nearest = TRACK.nearest;
+export const gates = TRACK.gates;
 ```
 
 ## test/race.test.js
@@ -10394,91 +10826,118 @@ import assert from "node:assert/strict";
 import { io } from "socket.io-client";
 import { Race } from "../server/race.js";
 import { createGame } from "../server/index.js";
-import { point, LENGTH, nearest } from "../shared/track.js";
+import { overlap } from "../shared/contact.js";
+import { validSnapshot } from "../shared/protocol.js";
+import { TRACKS, getTrack } from "../shared/track.js";
 
-test("circuit has left/right turns, sweepers, gentle bends and a long straight", () => {
-  let left = false,
-    right = false,
-    sweepers = false,
-    gentle = false,
-    straight = 0,
-    longest = 0;
-  for (let s = 0; s < LENGTH; s++) {
-    const a = point(s),
-      b = point(s + 1);
-    const turn = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw));
-    left ||= turn < -0.01;
-    right ||= turn > 0.01;
-    sweepers ||= Math.abs(turn) > 0.015;
-    gentle ||= Math.abs(turn) > 0.005 && Math.abs(turn) <= 0.015;
-    straight = Math.abs(turn) < 0.001 ? straight + 1 : 0;
-    longest = Math.max(longest, straight);
+test("all four circuits are continuous, wide and have smooth long-radius corners", () => {
+  assert.equal(TRACKS.length, 4);
+  assert.equal(new Set(TRACKS.map((t) => t.id)).size, 4);
+  for (const track of TRACKS) {
+    assert.equal(getTrack(track.id), track);
+    assert.ok(track.width >= 24 && track.length > 1400);
+    assert.equal(track.gates.length, 24);
+    for (let s = 0; s < track.length; s += 0.7) {
+      const a = track.point(s),
+        b = track.point(s + 1);
+      const turn = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw));
+      assert.ok(
+        Math.abs(turn) < 0.035,
+        track.id + " corner radius stays above 28 metres",
+      );
+      assert.ok(Math.abs(track.nearest(a.x, a.z).s - s) < 0.001);
+      assert.ok(a.x > track.bounds.minX && a.x < track.bounds.maxX);
+      assert.ok(a.z > track.bounds.minZ && a.z < track.bounds.maxZ);
+    }
+    const a = track.point(-0.001),
+      b = track.point(0.001);
+    assert.ok(Math.hypot(a.x - b.x, a.z - b.z) < 0.003);
+    assert.ok(
+      Math.abs(Math.atan2(Math.sin(a.yaw - b.yaw), Math.cos(a.yaw - b.yaw))) <
+        0.001,
+    );
   }
-  assert.ok(left && right && sweepers && gentle);
-  assert.ok(longest >= 80);
 });
-test("track is continuous and nearest recovers distance", () => {
-  for (let s = 0; s < LENGTH; s += 0.7) {
-    const p = point(s);
-    assert.ok(Math.abs(nearest(p.x, p.z).s - s) < 0.001);
+test("all circuits support acceleration, brakes, contacts, barriers and safe reset", () => {
+  for (const track of TRACKS) {
+    const r = new Race(track.id),
+      c = r.add("a", 0);
+    let now = 10000;
+    const initial = c.b.position.z;
+    c.input = { up: true };
+    for (let i = 0; i < 100; i++) {
+      c.inputAt = now;
+      r.step(1 / 60, now, true, 10000);
+      now += 1000 / 60;
+    }
+    assert.ok(c.b.position.z > initial + 10, track.id);
+    assert.ok(c.b.position.y > 0.3 && c.b.position.y < 0.7);
+    c.input = { down: true };
+    for (let i = 0; i < 220; i++) {
+      c.inputAt = now;
+      r.step(1 / 60, now, true, 10000);
+      now += 1000 / 60;
+    }
+    assert.ok(c.b.velocity.z < 0, track.id + " reverses");
+    const wall = track.point(0, track.width / 2 - 2);
+    c.b.position.set(wall.x, 0.55, wall.z);
+    c.yaw = wall.yaw + Math.PI / 2;
+    c.input = { up: true };
+    for (let i = 0; i < 180; i++) {
+      c.inputAt = now;
+      r.step(1 / 60, now, true, 10000);
+      now += 1000 / 60;
+    }
+    assert.ok(
+      track.nearest(c.b.position.x, c.b.position.z).distance < track.width / 2,
+      track.id + " barrier contains car",
+    );
+    const rival = r.add("b", 1),
+      p = track.point(80);
+    c.b.position.set(p.x, 0.55, p.z);
+    rival.b.position.set(p.x, 0.55, p.z);
+    c.yaw = rival.yaw = p.yaw;
+    c.b.quaternion.setFromEuler(0, p.yaw, 0);
+    rival.b.quaternion.setFromEuler(0, p.yaw, 0);
+    c.input = {};
+    rival.input = {};
+    c.b.velocity.setZero();
+    rival.b.velocity.setZero();
+    r.step(1 / 60, now, true, 10000);
+    const pose = (v) => ({ x: v.b.position.x, z: v.b.position.z, yaw: v.yaw });
+    const hit = overlap(pose(c), pose(rival));
+    assert.ok(!hit || hit.depth < 0.08, track.id + " contacts separate cars");
+    assert.equal(r.reset(c), true);
+    assert.ok(
+      !overlap(pose(c), pose(rival), 0.2),
+      track.id + " reset finds free space",
+    );
+    for (const car of r.snapshot())
+      assert.ok([car.x, car.z, car.vx, car.vz, car.yaw].every(Number.isFinite));
   }
-  assert.ok(
-    Math.hypot(
-      point(-0.001).x - point(0.001).x,
-      point(-0.001).z - point(0.001).z,
-    ) < 0.003,
-  );
 });
-test("server physics accelerates, brakes, reverses, collides and remains grounded", () => {
-  const r = new Race(),
-    c = r.add("a", 0);
-  let now = 10000;
-  const initialZ = c.b.position.z;
-  c.input = { up: true };
-  for (let i = 0; i < 100; i++) {
-    c.inputAt = now;
-    r.step(1 / 60, now, true, 10000);
-    now += 1000 / 60;
+test("each circuit rejects skipped/backward checkpoints and finishes three ordered laps", () => {
+  for (const track of TRACKS) {
+    const r = new Race(track.id),
+      c = r.add("a", 0);
+    function cross(n, back = false) {
+      const distance = (n * track.length) / 24;
+      const a = track.point(distance - (back ? -1 : 1));
+      const b = track.point(distance + (back ? -1 : 1));
+      c.previous = a;
+      c.b.position.set(b.x, 0.5, b.z);
+      r.progress(c, 10000 + n * 100, 10000);
+    }
+    cross(3);
+    assert.equal(c.passed, 0);
+    cross(1, true);
+    assert.equal(c.passed, 0);
+    for (let n = 1; n <= 72; n++) cross(n);
+    assert.equal(c.passed, 72);
+    assert.equal(c.finished, 7200);
+    r.reset(c);
+    assert.equal(c.passed, 72);
   }
-  assert.ok(c.b.position.z > initialZ + 10);
-  assert.ok(c.b.position.y > 0.3 && c.b.position.y < 0.7);
-  c.input = { down: true };
-  for (let i = 0; i < 220; i++) {
-    c.inputAt = now;
-    r.step(1 / 60, now, true, 10000);
-    now += 1000 / 60;
-  }
-  assert.ok(c.b.velocity.z < 0);
-  c.b.position.set(126, 0.55, 0);
-  c.yaw = Math.PI / 2;
-  c.input = { up: true };
-  for (let i = 0; i < 180; i++) {
-    c.inputAt = now;
-    r.step(1 / 60, now, true, 10000);
-    now += 1000 / 60;
-  }
-  assert.ok(c.b.position.x < 132, "barrier contains car");
-});
-test("checkpoints reject skips/backward crossings; 3 ordered laps finish", () => {
-  const r = new Race(),
-    c = r.add("a", 0);
-  function cross(n, back = false) {
-    const s = (n * LENGTH) / 24,
-      a = point(s - (back ? -1 : 1)),
-      b = point(s + (back ? -1 : 1));
-    c.previous = a;
-    c.b.position.set(b.x, 0.5, b.z);
-    r.progress(c, 10000 + n * 100, 10000);
-  }
-  cross(3);
-  assert.equal(c.passed, 0);
-  cross(1, true);
-  assert.equal(c.passed, 0);
-  for (let n = 1; n <= 72; n++) cross(n);
-  assert.equal(c.passed, 72);
-  assert.equal(c.finished, 7200);
-  r.reset(c);
-  assert.equal(c.passed, 72);
 });
 test("stale inputs stop accelerating and lobby ignores inputs", () => {
   const r = new Race(),
@@ -10491,22 +10950,27 @@ test("stale inputs stop accelerating and lobby ignores inputs", () => {
   r.step(1 / 60, 10000, false, 0);
   assert.ok(Math.abs(c.b.velocity.z) < 0.01);
 });
-test("a car can physically drive three complete laps through every checkpoint", () => {
-  const r = new Race(),
-    c = r.add("driver", 0);
-  let now = 10000;
-  for (let i = 0; i < 18000 && !c.finished; i++) {
-    const p = c.b.position,
-      target = point(nearest(p.x, p.z).s + 10),
-      desired = Math.atan2(target.x - p.x, target.z - p.z),
-      error = Math.atan2(Math.sin(desired - c.yaw), Math.cos(desired - c.yaw));
-    c.input = { up: true, left: error < -0.045, right: error > 0.045 };
-    c.inputAt = now;
-    r.step(1 / 60, now, true, 10000);
-    now += 1000 / 60;
+test("a car can physically drive three complete laps on every circuit", () => {
+  for (const track of TRACKS) {
+    const r = new Race(track.id),
+      c = r.add("driver", 0);
+    let now = 10000;
+    for (let i = 0; i < 18000 && !c.finished; i++) {
+      const p = c.b.position,
+        target = track.point(track.nearest(p.x, p.z).s + 10);
+      const desired = Math.atan2(target.x - p.x, target.z - p.z);
+      const error = Math.atan2(
+        Math.sin(desired - c.yaw),
+        Math.cos(desired - c.yaw),
+      );
+      c.input = { up: true, left: error < -0.045, right: error > 0.045 };
+      c.inputAt = now;
+      r.step(1 / 60, now, true, 10000);
+      now += 1000 / 60;
+    }
+    assert.equal(c.passed, 72, track.id);
+    assert.ok(c.finished > 10000 && c.finished < 300000, track.id);
   }
-  assert.equal(c.passed, 72);
-  assert.ok(c.finished > 10000 && c.finished < 300000);
 });
 test("real Socket.IO clients: validation, isolation, host authority, movement, results, rematch, cleanup", async (t) => {
   const game = await createGame();
@@ -10542,6 +11006,8 @@ test("real Socket.IO clients: validation, isolation, host authority, movement, r
   const created = await send(a, "enter", { name: "Alpha", create: true });
   assert.equal(created.ok, true);
   const room = game.rooms.get(created.code);
+  const initialTrack = room.race.track.id;
+  assert.ok(TRACKS.some((t) => t.id === initialTrack));
   assert.equal((await send(a, "start")).ok, true);
   room.startAt = Date.now() - 1000;
   await new Promise((r) => setTimeout(r, 80));
@@ -10551,6 +11017,8 @@ test("real Socket.IO clients: validation, isolation, host authority, movement, r
   assert.equal(room.phase, "results");
   assert.equal((await send(a, "rematch")).ok, true);
   assert.equal(room.phase, "lobby");
+  assert.notEqual(room.race.track.id, initialTrack);
+  const rematchTrack = room.race.track.id;
   assert.equal(
     (await send(b, "enter", { name: "Bravo", code: created.code })).ok,
     true,
@@ -10574,6 +11042,10 @@ test("real Socket.IO clients: validation, isolation, host authority, movement, r
   assert.ok(room.race.cars.get(a.id).b.position.z > initial);
   assert.ok(bState.cars.find((p) => p.id === a.id).z > initial);
   assert.equal(bState.players.length, 2);
+  assert.equal(bState.trackId, rematchTrack);
+  assert.equal(validSnapshot(bState), true);
+  assert.equal(validSnapshot({ ...bState, trackId: "invalid" }), false);
+  assert.equal(room.race.track.id, rematchTrack);
   room.race.cars.get(a.id).finished = 1200;
   room.race.cars.get(b.id).finished = 1500;
   await new Promise((r) => setTimeout(r, 80));

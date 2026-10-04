@@ -1,11 +1,12 @@
 import { drive } from "../shared/driving.js";
 import * as C from "cannon-es";
-import { TRACK, LENGTH, point, nearest, gates } from "../shared/track.js";
+import { getTrack } from "../shared/track.js";
 
 import { CAR_HALF_WIDTH, CAR_HALF_LENGTH, overlap } from "../shared/contact.js";
 
 export class Race {
-  constructor() {
+  constructor(trackId = "palm") {
+    this.track = getTrack(trackId);
     this.world = new C.World({ gravity: new C.Vec3(0, -18, 0) });
     this.world.defaultContactMaterial.friction = 0;
     this.world.defaultContactMaterial.restitution = 0.06;
@@ -14,16 +15,20 @@ export class Race {
     const ground = new C.Body({ mass: 0, shape: new C.Plane() });
     ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
     this.world.addBody(ground);
-    for (let i = 0; i < TRACK.segments; i++)
+    for (let i = 0; i < this.track.segments; i++)
       for (const side of [-1, 1]) {
-        const p = point(
-          ((i + 0.5) * LENGTH) / TRACK.segments,
-          side * (TRACK.width / 2 + 0.5),
+        const p = this.track.point(
+          ((i + 0.5) * this.track.length) / this.track.segments,
+          side * (this.track.width / 2 + 0.5),
         );
         const b = new C.Body({
           mass: 0,
           shape: new C.Box(
-            new C.Vec3(0.5, 1.2, (LENGTH / TRACK.segments) * 0.57),
+            new C.Vec3(
+              0.5,
+              1.2,
+              (this.track.length / this.track.segments) * 0.57,
+            ),
           ),
           position: new C.Vec3(p.x, 1, p.z),
         });
@@ -78,12 +83,14 @@ export class Race {
     this.cars.delete(id);
   }
   reset(c, grid = false, index = 0) {
-    const s = grid ? -8 - Math.floor(index / 2) * 7 : (c.passed * LENGTH) / 24;
-    let p = point(s, grid ? (index % 2 ? 3 : -3) : 0);
+    const s = grid
+      ? -8 - Math.floor(index / 2) * 7
+      : (c.passed * this.track.length) / 24;
+    let p = this.track.point(s, grid ? (index % 2 ? 3 : -3) : 0);
     let free = false;
     for (let back = 0; back <= 60 && !free; back += 6) {
       for (const lane of [grid ? (index % 2 ? 3 : -3) : 0, -4, 4, -7, 7]) {
-        const candidate = point(s - back, lane);
+        const candidate = this.track.point(s - back, lane);
         if (
           [...this.cars.values()].every(
             (other) =>
@@ -159,7 +166,7 @@ export class Race {
         vx: c.b.velocity.x,
         vz: c.b.velocity.z,
       };
-      drive(motion, input, safeDt, running && !c.finished);
+      drive(motion, input, safeDt, running && !c.finished, this.track);
       c.yaw = motion.yaw;
       c.steer = motion.steer;
       c.b.velocity.x = motion.vx;
@@ -214,7 +221,9 @@ export class Race {
     }
 
     // 2. Iterative non-penetration position relaxation and barrier containment
-    for (let pass = 0; pass < 8; pass++) {
+    // One car cannot be pushed back into another by containment, so solo
+    // driving needs only one relaxation pass. Multiplayer keeps eight.
+    for (let pass = 0; pass < (bodies.length > 1 ? 8 : 1); pass++) {
       for (let i = 0; i < bodies.length; i++) {
         for (let j = i + 1; j < bodies.length; j++) {
           const a = bodies[i],
@@ -235,8 +244,8 @@ export class Race {
       }
       // Project against road edge inside relaxation
       for (const c of bodies) {
-        const near = nearest(c.b.position.x, c.b.position.z);
-        const frame = point(near.s);
+        const near = this.track.nearest(c.b.position.x, c.b.position.z);
+        const frame = this.track.point(near.s);
         const nx = Math.cos(frame.yaw),
           nz = -Math.sin(frame.yaw);
         const offset =
@@ -245,7 +254,7 @@ export class Race {
         const extent =
           CAR_HALF_WIDTH * Math.abs(Math.cos(relative)) +
           CAR_HALF_LENGTH * Math.abs(Math.sin(relative));
-        const limit = TRACK.width / 2 - extent - 0.02;
+        const limit = this.track.width / 2 - extent - 0.02;
         if (Math.abs(offset) > limit) {
           const excess = offset - Math.sign(offset) * limit;
           c.b.position.x -= nx * excess;
@@ -304,12 +313,12 @@ export class Race {
         c.b.velocity.z = (c.b.velocity.z / currentSpeed) * 52;
       }
 
-      const near = nearest(c.b.position.x, c.b.position.z);
+      const near = this.track.nearest(c.b.position.x, c.b.position.z);
       // At low speed the tires cannot steer a nose pressed into a barrier.
       // Help the car face back onto the road while throttle is held, so a
       // contact does not leave it grinding against the wall indefinitely.
       if (running && !c.finished && c.controls?.up && currentSpeed < 9) {
-        const frame = point(near.s);
+        const frame = this.track.point(near.s);
         const side =
           (c.b.position.x - frame.x) * Math.cos(frame.yaw) -
           (c.b.position.z - frame.z) * Math.sin(frame.yaw);
@@ -317,7 +326,7 @@ export class Race {
         const extent =
           CAR_HALF_WIDTH * Math.abs(Math.cos(relativeYaw)) +
           CAR_HALF_LENGTH * Math.abs(Math.sin(relativeYaw));
-        const limit = TRACK.width / 2 - extent;
+        const limit = this.track.width / 2 - extent;
         const outward = Math.sin(relativeYaw) * Math.sign(side);
         if (Math.abs(side) > limit - 0.25 && outward > 0.12) {
           const desiredYaw = frame.yaw - Math.sign(side) * 0.24;
@@ -344,7 +353,7 @@ export class Race {
   progress(c, now, startAt, dt = 0) {
     const safeDt = Math.min(0.05, Math.max(0, Number.isFinite(dt) ? dt : 0));
     const next = (c.passed + 1) % 24,
-      g = gates[next],
+      g = this.track.gates[next],
       p = c.b.position,
       old = c.previous;
     const before =
@@ -353,9 +362,9 @@ export class Race {
     const across = Math.abs(
       (p.x - g.x) * Math.cos(g.yaw) - (p.z - g.z) * Math.sin(g.yaw),
     );
-    if (before <= 0 && after > 0 && across < TRACK.width / 2 + 2) {
+    if (before <= 0 && after > 0 && across < this.track.width / 2 + 2) {
       c.passed++;
-      if (c.passed === 24 * TRACK.laps) {
+      if (c.passed === 24 * this.track.laps) {
         const denom = after - before;
         const frac =
           Math.abs(denom) > 1e-4
@@ -393,14 +402,14 @@ export class Race {
           0.99,
           Math.max(
             -1,
-            (((((nearest(c.b.position.x, c.b.position.z).s -
-              ((c.passed % 24) * LENGTH) / 24 +
-              LENGTH / 2) %
-              LENGTH) +
-              LENGTH) %
-              LENGTH) -
-              LENGTH / 2) /
-              (LENGTH / 24),
+            (((((this.track.nearest(c.b.position.x, c.b.position.z).s -
+              ((c.passed % 24) * this.track.length) / 24 +
+              this.track.length / 2) %
+              this.track.length) +
+              this.track.length) %
+              this.track.length) -
+              this.track.length / 2) /
+              (this.track.length / 24),
           ),
         ),
     }));

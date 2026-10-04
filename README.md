@@ -8,7 +8,7 @@ A complete racing project for solo testing or friends: Babylon.js graphics, an a
 
 | Part            | Choice                      | Purpose                                                          |
 | --------------- | --------------------------- | ---------------------------------------------------------------- |
-| 3D              | Babylon.js 8                | PBR race cars, flowing circuit, environment and chase camera     |
+| 3D              | Babylon.js 8                | PBR race cars, four circuits and three camera views              |
 | Physics         | cannon-es 0.20 (MIT)        | Server-side ground, barrier and car contacts                     |
 | Multiplayer     | Socket.IO 4                 | Sequenced controls; 30 Hz racing snapshots, 2 Hz lobby snapshots |
 | Server          | Node.js 24, Express 5       | Serves the website and runs each race                            |
@@ -23,6 +23,8 @@ The client sends six boolean controls and an input sequence; it cannot submit po
 The browser uses a shared steering controller for fixed-step local prediction, acknowledges input sequences, and reconciles server corrections. Key presses and releases use reliable Socket.IO delivery; unchanged periodic input updates may be dropped under congestion. High-rate race snapshots may also be dropped under congestion, with reliable keyframes about every 233 ms. Opponents interpolate on a shared synchronized timeline with a bounded jitter buffer, limited extrapolation, and speed-limited visual catch-up after missing snapshots. Prediction yields to authoritative contacts near other cars and barriers, with a short visual handoff to avoid a visible snap. Sequenced snapshots are validated before reaching rendering, HUD or audio. Select a hosting region near the group. Names are escaped in the UI and placed above opponents as projected DOM labels that avoid HUD panels. Basic payload, nickname, room, player-count, request-rate and room-count limits protect the server. Room codes are invitations, not strong authentication.
 
 An interrupted connection keeps that driver's seat, car and race progress for up to 30 seconds. The same browser tab stores a temporary seat token and automatically reclaims the seat when its connection returns or the page is refreshed. Controls are released while disconnected; an active driver becomes host if needed. If the grace period expires, the driver is removed and empty rooms are deleted. New drivers still cannot join an active race. A host can rematch after results to reopen the lobby. Restarts and deploys erase all rooms and seat tokens.
+
+Four wide, smoothly curved circuits share one geometry definition across road rendering, barriers, driving prediction, checkpoint rules and minimap: Palm Grand Prix, Azure Coast, Ember Valley and Aurora Speedway. The server randomly selects a circuit when a room is created and chooses a different circuit on rematch. The lobby shows the upcoming circuit. Tracks remain flat to keep rendered surfaces and authoritative contact physics aligned.
 
 ## Project structure / important files
 
@@ -124,11 +126,11 @@ To test multiplayer with two windows:
 5. Click the game area if needed. Hold W to accelerate; use A/D to steer. In the other window watch the first car move. Use R if stuck. If a window loses focus, controls release automatically.
 6. Follow the loop and glowing gate posts for three laps. Each finish registers on the server. After both finish (or the timeout), the host clicks **RUN IT BACK ↻**, then starts again.
 
-Controls: W/Up accelerate; S/Down brake then reverse; A/Left and D/Right steer; Space drift; R reset. Touch buttons appear on devices with coarse pointers. Multiple keys or fingers holding one control remain active until the last is released. Losing focus releases all driving controls.
+Controls: W/Up accelerate; S/Down brake then reverse; A/Left and D/Right steer; Space drift; R reset; C cycle chase, cockpit and overhead cameras. The **VIEW** button also switches cameras. Touch buttons appear on devices with coarse pointers. Multiple keys or fingers holding one control remain active until the last is released. Losing focus releases all driving controls.
 
 Sound is opt-in using **SOUND OFF**. **MIXER** independently adjusts Master, Engine, Music and SFX. The original 64 BPM Japanese-inspired ambient score uses synthesized plucked, flute-like, piano-like and pad tones; music becomes quieter during racing. Engine pitch/load, shifts, tire/kerb sounds, wind and spatial opponents remain dynamic. Muting or hiding the page cancels transient sounds and music scheduling; resuming avoids replaying old cues. No recordings or commercial melodies are bundled.
 
-Graphics defaults to Medium; the button cycles through High, Ultra, Low and Medium. Tiers adjust resolution and shadows, with bounded adaptive resolution responding to frame times. Ultra starts above native resolution and costs more GPU time. The existing WebGL renderer is retained and validated with WebGL2; WebGPU was not introduced. The chase camera damps position and aim, and wheel/body motion follows speed, steering and load.
+Graphics defaults to Medium; the button cycles through High, Ultra, Low and Medium. Tiers adjust resolution and shadows, with bounded adaptive resolution responding to frame times. Ultra starts above native resolution and costs more GPU time. The existing WebGL renderer is retained and validated with WebGL2; WebGPU was not introduced. Three cameras provide a damped chase view, driver viewpoint and elevated overhead view. Wheel/body motion follows speed, steering and load.
 
 Testing over your home Wi-Fi requires the PC's LAN address, not localhost. Run `ipconfig`, find the active Wi-Fi adapter's IPv4 address, and open `http://THAT-ADDRESS:3000` on the other device. If Windows asks, allow Node on your trusted private network. The easiest test between different homes is the deployed HTTPS URL below; do not forward router ports.
 

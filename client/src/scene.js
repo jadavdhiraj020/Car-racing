@@ -14,12 +14,19 @@ import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
-import { TRACK, LENGTH, point, gates, nearest } from "../../shared/track.js";
+import { getTrack } from "../../shared/track.js";
 
 import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { RawCubeTexture } from "@babylonjs/core/Materials/Textures/rawCubeTexture";
 import { overlap } from "../../shared/contact.js";
-export function createScene(canvas, audioSystem = null) {
+export function createScene(canvas, audioSystem = null, track = getTrack()) {
+  const TRACK = track,
+    LENGTH = track.length,
+    point = track.point,
+    gates = track.gates,
+    nearest = track.nearest;
+  let cameraMode = "chase",
+    cameraTransition = 1;
   const engine = new Engine(canvas, true, {
     stencil: false,
     preserveDrawingBuffer: false,
@@ -27,6 +34,10 @@ export function createScene(canvas, audioSystem = null) {
   engine.setHardwareScalingLevel(1.5);
 
   const scene = new Scene(engine);
+  // Driving never ray-picks meshes; avoid automatic pointer scans over the circuit.
+  scene.skipPointerMovePicking = true;
+  scene.skipPointerDownPicking = true;
+  scene.skipPointerUpPicking = true;
   // Atmospheric haze and clear sky
   scene.clearColor = new Color4(0.58, 0.77, 0.74, 1);
   scene.fogMode = Scene.FOGMODE_EXP2;
@@ -82,7 +93,7 @@ export function createScene(canvas, audioSystem = null) {
   const isSoftware = /swiftshader|llvmpipe/i.test(glRenderer);
   if (!isSoftware) {
     try {
-      shadowGen = new ShadowGenerator(1024, sun);
+      shadowGen = new ShadowGenerator(512, sun);
       shadowGen.bias = 0.003;
       shadowGen.normalBias = 0.002;
     } catch (e) {
@@ -90,9 +101,14 @@ export function createScene(canvas, audioSystem = null) {
     }
   }
 
-  const camera = new FreeCamera("camera", new Vector3(180, 110, -150), scene);
-  camera.setTarget(new Vector3(120, 0, 0));
-  camera.minZ = 0.2;
+  const introPoint = point(0);
+  const camera = new FreeCamera(
+    "camera",
+    new Vector3(introPoint.x + 60, 55, introPoint.z - 70),
+    scene,
+  );
+  camera.setTarget(new Vector3(introPoint.x, 0, introPoint.z));
+  camera.minZ = 0.08;
   camera.maxZ = 1600;
   camera.fov = 0.82;
 
@@ -247,7 +263,7 @@ export function createScene(canvas, audioSystem = null) {
   }
 
   // Smooth wide road ribbon (22m wide)
-  const edges = [-11, 11].map((offset) =>
+  const edges = [-TRACK.width / 2, TRACK.width / 2].map((offset) =>
     Array.from({ length: TRACK.segments + 1 }, (_, i) => {
       const p = point((i * LENGTH) / TRACK.segments, offset);
       return new Vector3(p.x, 0.08, p.z);
@@ -258,6 +274,29 @@ export function createScene(canvas, audioSystem = null) {
     { pathArray: edges, sideOrientation: 2 },
     scene,
   );
+  const asphalt = new DynamicTexture(
+    "fine asphalt grain",
+    { width: 128, height: 128 },
+    scene,
+    false,
+  );
+  const asphaltContext = asphalt.getContext();
+  const pixels = asphaltContext.createImageData(128, 128);
+  let grainSeed = 481;
+  for (let i = 0; i < pixels.data.length; i += 4) {
+    grainSeed = (Math.imul(grainSeed, 1664525) + 1013904223) >>> 0;
+    const grain = 52 + ((grainSeed >>> 24) % 13);
+    pixels.data[i] = grain;
+    pixels.data[i + 1] = grain + 3;
+    pixels.data[i + 2] = grain + 5;
+    pixels.data[i + 3] = 255;
+  }
+  asphaltContext.putImageData(pixels, 0, 0);
+  asphalt.update();
+  asphalt.uScale = 3;
+  asphalt.vScale = LENGTH / 8;
+  road.diffuseTexture = asphalt;
+  road.diffuseColor = Color3.White();
   surface.material = road;
   surface.receiveShadows = !!shadowGen;
 
@@ -283,8 +322,8 @@ export function createScene(canvas, audioSystem = null) {
     const p = point(sMid);
 
     for (const side of [-1, 1]) {
-      const curbDist = side * 10.6;
-      const wallDist = side * 11.6;
+      const curbDist = side * (TRACK.width / 2 - 0.4);
+      const wallDist = side * (TRACK.width / 2 + 0.6);
       const curbPos = point(sMid, curbDist);
       const wallPos = point(sMid, wallDist);
 
@@ -345,8 +384,9 @@ export function createScene(canvas, audioSystem = null) {
   }
 
   // Checkered start / finish line
-  for (let i = 0; i < 14; i++) {
-    const offset = -9.75 + i * 1.5;
+  const checkerCount = Math.floor(TRACK.width / 1.5);
+  for (let i = 0; i < checkerCount; i++) {
+    const offset = -(checkerCount - 1) * 0.75 + i * 1.5;
     const p = point(0, offset);
     for (let j = 0; j < 2; j++) {
       box(
@@ -354,10 +394,11 @@ export function createScene(canvas, audioSystem = null) {
         1.5,
         0.04,
         1.4,
-        p.x,
+        p.x + Math.sin(p.yaw) * j * 1.4,
         0.12,
-        p.z + j * 1.4,
+        p.z + Math.cos(p.yaw) * j * 1.4,
         (i + j) % 2 ? dark : cream,
+        p.yaw,
       );
     }
   }
@@ -414,12 +455,36 @@ export function createScene(canvas, audioSystem = null) {
 
   // Start / finish gantry arch
   const startP = point(0);
-  box("gantry left", 0.9, 9, 0.9, startP.x - 13.5, 4.5, startP.z, metal);
-  box("gantry right", 0.9, 9, 0.9, startP.x + 13.5, 4.5, startP.z, metal);
-  const arch = box("start arch", 28, 2.4, 1.2, startP.x, 9, startP.z, lime);
+  const gantryRoot = new TransformNode("starting gantry", scene);
+  gantryRoot.position.set(startP.x, 0, startP.z);
+  gantryRoot.rotation.y = startP.yaw;
+  const gantryHalf = TRACK.width / 2 + 2.5;
+  box("gantry left", 0.9, 9, 0.9, -gantryHalf, 4.5, 0, metal, 0, gantryRoot);
+  box("gantry right", 0.9, 9, 0.9, gantryHalf, 4.5, 0, metal, 0, gantryRoot);
+  const arch = box(
+    "start arch",
+    gantryHalf * 2 + 1,
+    2.4,
+    1.2,
+    0,
+    9,
+    0,
+    lime,
+    0,
+    gantryRoot,
+  );
   if (shadowGen) shadowGen.addShadowCaster(arch);
-
-  sign("APEX GRAND PRIX", startP.x, 9, startP.z - 0.7, 24, 2.2, 0, 80);
+  const title = sign(
+    "APEX GRAND PRIX",
+    0,
+    9,
+    -0.7,
+    TRACK.width + 2,
+    2.2,
+    0,
+    80,
+  );
+  title.parent = gantryRoot;
 
   // 5 Synchronized 3D Start Gantry Lights (Facing drivers on the grid)
   const gantryBulbs = [];
@@ -427,15 +492,27 @@ export function createScene(canvas, audioSystem = null) {
   const gantryRedMat = material("gantryRed", "#ff2222", 0.9, "#ff1818");
   const gantryGreenMat = material("gantryGreen", "#22ff44", 0.9, "#16ff38");
   for (let i = 0; i < 5; i++) {
-    const lx = startP.x + (i - 2) * 2.2;
-    box("gantry housing " + i, 1.3, 1.8, 0.45, lx, 7.3, startP.z - 0.65, dark);
+    const lx = (i - 2) * 2.2;
+    box(
+      "gantry housing " + i,
+      1.3,
+      1.8,
+      0.45,
+      lx,
+      7.3,
+      -0.65,
+      dark,
+      0,
+      gantryRoot,
+    );
     const bulb = MeshBuilder.CreateCylinder(
       "gantry bulb " + i,
       { diameter: 0.76, height: 0.14, tessellation: 16 },
       scene,
     );
     bulb.rotation.x = Math.PI / 2;
-    bulb.position.set(lx, 7.3, startP.z - 0.88);
+    bulb.parent = gantryRoot;
+    bulb.position.set(lx, 7.3, -0.88);
     bulb.material = gantryOffMat;
     gantryBulbs.push(bulb);
   }
@@ -443,7 +520,7 @@ export function createScene(canvas, audioSystem = null) {
   // Checkpoint gates visual markers
   const gateMeshes = gates.map((p, i) => {
     const root = new TransformNode("checkpoint " + i, scene);
-    for (const offset of [-10, 10]) {
+    for (const offset of [-TRACK.width / 2 + 1, TRACK.width / 2 - 1]) {
       box("checkpoint post", 0.25, 3.5, 0.25, offset, 1.75, 0, lime, 0, root);
     }
     root.position.set(p.x, 0, p.z);
@@ -489,7 +566,7 @@ export function createScene(canvas, audioSystem = null) {
     [100, "100"],
     [50, "50"],
   ]) {
-    const p = point(200 - dist, 13);
+    const p = point(LENGTH * 0.14 - dist, TRACK.width / 2 + 2);
     sign(label, p.x, 2, p.z, 3.5, 2.2, p.yaw + Math.PI / 2, 80);
     box("board post", 0.2, 2, 0.2, p.x, 1, p.z, metal);
   }
@@ -500,7 +577,7 @@ export function createScene(canvas, audioSystem = null) {
     [100, "100"],
     [50, "50"],
   ]) {
-    const p = point(1080 - dist, 13);
+    const p = point(LENGTH * 0.58 - dist, TRACK.width / 2 + 2);
     sign(label, p.x, 2, p.z, 3.5, 2.2, p.yaw + Math.PI / 2, 80);
     box("board post south", 0.2, 2, 0.2, p.x, 1, p.z, metal);
   }
@@ -541,6 +618,7 @@ export function createScene(canvas, audioSystem = null) {
   const thinPalms = !!engine.getCaps().instancedArrays;
   const palmGroups = new Map();
   function palm(x, z, scale = 1) {
+    if (nearest(x, z).distance < TRACK.width / 2 + 7) return;
     if (thinPalms) {
       const sector =
         Math.floor(((Math.atan2(z, x) + Math.PI) * 8) / (2 * Math.PI)) % 8;
@@ -624,23 +702,29 @@ export function createScene(canvas, audioSystem = null) {
     baseFrond.isVisible = false;
   }
 
-  // Modern Pit Lane / Paddock complex along the main straight
-  box("pit building", 14, 8, 120, 142, 4, 20, cream);
-  box("pit roof", 16, 0.8, 124, 142, 8.4, 20, red);
-  box("pit glass", 0.1, 3.2, 100, 134.9, 5.5, 20, glass);
-  sign("PADDOCK CLUB", 134.8, 9.8, 20, 26, 3, Math.PI / 2, 70);
-
-  // Spectator Grandstands
-  for (let i = 0; i < 5; i++) {
+  // Short paddock and terraces align with this circuit's actual start straight.
+  const paddock = point(22, -(TRACK.width / 2 + 15));
+  const paddockRoot = new TransformNode("paddock complex", scene);
+  paddockRoot.position.set(paddock.x, 0, paddock.z);
+  paddockRoot.rotation.y = paddock.yaw;
+  box("pit building", 12, 6, 48, 0, 3, 0, cream, 0, paddockRoot);
+  box("pit roof", 14, 0.5, 50, 0, 6.3, 0, carbon, 0, paddockRoot);
+  box("pit glass", 0.1, 2.3, 44, 6.1, 4.2, 0, glass, 0, paddockRoot);
+  const club = sign("PADDOCK CLUB", 6.2, 7.3, 0, 22, 2.2, -Math.PI / 2, 70);
+  club.parent = paddockRoot;
+  const terrace = point(-65, TRACK.width / 2 + 20);
+  for (let i = 0; i < 4; i++) {
+    const r = point(-65, TRACK.width / 2 + 16 + i * 3);
     box(
-      "grandstand",
-      12,
-      1.5 + i * 1.2,
-      50,
-      95,
-      (1.5 + i * 1.2) / 2,
-      -70,
+      "grandstand terrace",
+      3.5,
+      1.2 + i * 1.1,
+      38,
+      r.x,
+      (1.2 + i * 1.1) / 2,
+      r.z,
       i % 2 ? cream : dark,
+      terrace.yaw,
     );
   }
 
@@ -648,7 +732,9 @@ export function createScene(canvas, audioSystem = null) {
   const batches = new Map();
   for (const mesh of [...scene.meshes]) {
     if (
-      mesh.parent ||
+      (mesh.parent &&
+        mesh.parent !== gantryRoot &&
+        mesh.parent !== paddockRoot) ||
       mesh.isAnInstance ||
       mesh.instances?.length ||
       mesh.thinInstanceCount ||
@@ -662,7 +748,13 @@ export function createScene(canvas, audioSystem = null) {
     batches.set(mesh.material, list);
   }
   for (const [mat, meshes] of batches) {
-    if (meshes.length < 2) continue;
+    if (meshes.length < 2) {
+      meshes[0]?.freezeWorldMatrix();
+      continue;
+    }
+    const castsShadow = meshes.some((m) =>
+      shadowGen?.getShadowMap()?.renderList.includes(m),
+    );
     const merged = Mesh.MergeMeshes(
       meshes,
       true,
@@ -673,6 +765,7 @@ export function createScene(canvas, audioSystem = null) {
     );
     if (merged) {
       merged.material = mat;
+      if (castsShadow) shadowGen.addShadowCaster(merged);
       merged.receiveShadows = true;
       merged.freezeWorldMatrix();
     }
@@ -731,7 +824,7 @@ export function createScene(canvas, audioSystem = null) {
   const cockpitInterior = material("cockpitInterior", "#0e1418", 0.1);
   const brakeDiscCold = material("brakeDiscCold", "#2b2f33", 0.45);
   const brakeDiscHot = material("brakeDiscHot", "#ff4500", 0.95, "#ff3300");
-  const tireStripe = material("tireStripe", "#e6382a", 0.2, "#881510");
+  const tireStripe = material("tireStripe", "#e6bc46", 0.12);
   const visorMat = material("visorGlass", "#0f171c", 0.95);
 
   function car(player) {
@@ -775,7 +868,7 @@ export function createScene(canvas, audioSystem = null) {
       0.02,
       1.3,
       0,
-      0.42,
+      0.35,
       1.15,
       liveryStripeMat,
       0,
@@ -818,7 +911,7 @@ export function createScene(canvas, audioSystem = null) {
       { width: 0.38, height: 0.38 },
       scene,
     );
-    nosePlate.position.set(0, 0.39, 1.35);
+    nosePlate.position.set(0, 0.355, 1.35);
     nosePlate.rotation.x = Math.PI / 2 - 0.25;
     nosePlate.material = numMat;
     nosePlate.parent = chassis;
@@ -873,12 +966,12 @@ export function createScene(canvas, audioSystem = null) {
     const body = shell(
       "monocoque",
       [
-        [-2.12, 0.88, 0.03, 0.42],
-        [-1.45, 1.04, 0.04, 0.63],
-        [-0.55, 1.01, 0.04, 0.65],
-        [0.48, 0.97, 0.04, 0.53],
-        [1.52, 0.93, 0.04, 0.39],
-        [2.08, 0.75, 0.09, 0.27],
+        [-2.12, 0.28, 0.03, 0.38],
+        [-1.45, 0.45, 0.04, 0.69],
+        [-0.55, 0.46, 0.04, 0.68],
+        [0.48, 0.39, 0.04, 0.48],
+        [1.52, 0.21, 0.07, 0.34],
+        [2.08, 0.13, 0.09, 0.23],
       ],
       paint,
     );
@@ -928,21 +1021,55 @@ export function createScene(canvas, audioSystem = null) {
       0,
       chassis,
     );
-    shell(
-      "windscreen visor",
-      [
-        [-1.02, 0.65, 0.52, 0.79],
-        [-0.62, 0.65, 0.55, 1.05],
-        [0.18, 0.62, 0.51, 1.02],
-        [0.85, 0.64, 0.44, 0.51],
-      ],
-      glass,
-    );
+    // Open cockpit wind deflector, rather than a closed sports-car canopy.
+    box("wind deflector", 0.58, 0.08, 0.045, 0, 0.63, 0.52, glass, 0, chassis);
 
     // F1 Safety Halo
     box("halo pillar", 0.055, 0.38, 0.07, 0, 0.72, 0.48, carbon, 0, chassis);
-    box("halo arch", 0.78, 0.065, 0.74, 0, 0.91, 0.14, carbon, 0, chassis);
+    const halo = MeshBuilder.CreateTube(
+      "halo horseshoe",
+      {
+        path: Array.from({ length: 17 }, (_, i) => {
+          const a = (i / 16) * Math.PI;
+          return new Vector3(
+            Math.cos(a) * 0.39,
+            0.91,
+            Math.sin(a) * 0.56 - 0.15,
+          );
+        }),
+        radius: 0.028,
+        tessellation: 6,
+      },
+      scene,
+    );
+    halo.parent = chassis;
+    halo.material = carbon;
+    for (const side of [-1, 1])
+      box(
+        "halo rear mount",
+        0.04,
+        0.25,
+        0.05,
+        side * 0.39,
+        0.79,
+        -0.15,
+        carbon,
+        0,
+        chassis,
+      );
 
+    const steeringWheel = new TransformNode("driver steering", scene);
+    steeringWheel.parent = chassis;
+    steeringWheel.position.set(0, 0.74, 0.9);
+    const wheelRim = MeshBuilder.CreateTorus(
+      "steering rim",
+      { diameter: 0.25, thickness: 0.025, tessellation: 16 },
+      scene,
+    );
+    wheelRim.rotation.x = Math.PI / 2;
+    wheelRim.parent = steeringWheel;
+    wheelRim.material = carbon;
+    box("steering controls", 0.19, 0.07, 0.05, 0, 0, 0, dark, 0, steeringWheel);
     // 3D Driver Helmet inside cockpit
     const helmet = MeshBuilder.CreateSphere(
       "helmet",
@@ -967,8 +1094,18 @@ export function createScene(canvas, audioSystem = null) {
     box("shark fin", 0.045, 0.46, 1.45, 0, 0.81, -0.84, carbon, 0, chassis);
 
     // 4. Sidepods, Cooling Inlets & Aero Skirts
-    for (const x of [-0.76, 0.76]) {
-      box("sidepod body", 0.44, 0.35, 1.4, x, 0.26, 0.12, paint, 0, chassis);
+    for (const x of [-0.65, 0.65]) {
+      const pod = shell(
+        "sculpted sidepod",
+        [
+          [-1.15, 0.14, 0.06, 0.22],
+          [-0.55, 0.23, 0.06, 0.46],
+          [0.4, 0.22, 0.09, 0.43],
+          [0.75, 0.16, 0.14, 0.35],
+        ],
+        paint,
+      );
+      pod.position.x = x;
       box(
         "radiator duct",
         0.36,
@@ -1124,7 +1261,7 @@ export function createScene(canvas, audioSystem = null) {
     const brakeDiscs = [];
 
     for (const x of [-1.05, 1.05]) {
-      for (const z of [-1.2, 1.2]) {
+      for (const z of [-1.35, 1.3]) {
         const pivot = new TransformNode("wheel pivot", scene);
         pivot.parent = root;
         pivot.position.set(x, -0.05, z);
@@ -1135,7 +1272,7 @@ export function createScene(canvas, audioSystem = null) {
         // Tire tread
         const wheel = MeshBuilder.CreateCylinder(
           "wheel",
-          { diameter: 0.76, height: 0.38, tessellation: 16 },
+          { diameter: 0.82, height: z < 0 ? 0.44 : 0.36, tessellation: 20 },
           scene,
         );
         wheel.rotation.z = Math.PI / 2;
@@ -1207,6 +1344,24 @@ export function createScene(canvas, audioSystem = null) {
           pivot,
         );
 
+        // Visible double wishbones connect the exposed wheels to the monocoque.
+        for (const armY of [0.04, 0.22]) {
+          const arm = MeshBuilder.CreateTube(
+            "carbon wishbone",
+            {
+              path: [
+                new Vector3(x * 0.43, armY, z - 0.3),
+                new Vector3(x, armY - 0.1, z),
+                new Vector3(x * 0.43, armY, z + 0.3),
+              ],
+              radius: 0.022,
+              tessellation: 5,
+            },
+            scene,
+          );
+          arm.parent = chassis;
+          arm.material = carbon;
+        }
         wheels.push({ pivot, wheel: axle, front: z > 0 });
       }
     }
@@ -1216,6 +1371,8 @@ export function createScene(canvas, audioSystem = null) {
       const groups = new Map();
       for (const mesh of parent.getChildMeshes(true)) {
         if (
+          mesh === helmet ||
+          mesh === helmetVisor ||
           !mesh.isEnabled() ||
           brakeLights.includes(mesh) ||
           brakeDiscs.includes(mesh)
@@ -1255,6 +1412,8 @@ export function createScene(canvas, audioSystem = null) {
     const result = {
       root,
       chassis,
+      cockpitOccluders: [helmet, helmetVisor],
+      steeringWheel,
       wheels,
       label,
       posEl,
@@ -1368,7 +1527,7 @@ export function createScene(canvas, audioSystem = null) {
               right: t.steer > 0.1,
               drift: t.drift,
             };
-          predict(motion, command, Math.min(1 / 60, horizon - elapsed));
+          predict(motion, command, Math.min(1 / 60, horizon - elapsed), track);
         }
         if (c.prediction) {
           const age = Math.min(
@@ -1462,6 +1621,8 @@ export function createScene(canvas, audioSystem = null) {
   const identityMatrix = Matrix.Identity();
   const lookSpring = camera.getTarget().clone();
   const cameraDesired = new Vector3();
+  const previousCameraAnchor = new Vector3();
+  let cameraAnchorReady = false;
   const cameraLook = new Vector3();
   const cameraOrbit = new Vector3();
   const listenerForward = new Vector3();
@@ -1665,7 +1826,7 @@ export function createScene(canvas, audioSystem = null) {
           const age = Math.min(0.05, Math.max(0, (now - c.predictedAt) / 1000));
           let remaining = age;
           while (remaining >= 1 / 60) {
-            predict(c.prediction, localInput, 1 / 60);
+            predict(c.prediction, localInput, 1 / 60, track);
             remaining -= 1 / 60;
           }
           c.predictedAt = now - remaining * 1000;
@@ -1865,7 +2026,9 @@ export function createScene(canvas, audioSystem = null) {
 
         // Authentic kerb chassis micro-vibration
         const trackDist = nearest(targetPosX, targetPosZ).distance;
-        const onKerbZone = trackDist >= 9.8 && trackDist <= 11.6;
+        const onKerbZone =
+          trackDist >= TRACK.width / 2 - 1.2 &&
+          trackDist <= TRACK.width / 2 + 0.6;
         if (onKerbZone && (t.speed || 0) > 7) {
           c.chassis.position.y =
             -0.32 +
@@ -1875,12 +2038,14 @@ export function createScene(canvas, audioSystem = null) {
           c.chassis.position.y += (-0.32 - c.chassis.position.y) * alpha;
         }
 
+        c.steeringWheel.rotation.z +=
+          (-visualSteer * 0.65 - c.steeringWheel.rotation.z) * alpha;
         // Wheel spinning & Ackermann steering geometry
         for (const w of c.wheels) {
           const forwardSpeed =
             (t.vx || 0) * Math.sin(t.yaw) + (t.vz || 0) * Math.cos(t.yaw);
           w.wheel.rotation.x =
-            (w.wheel.rotation.x + (forwardSpeed * dt) / 0.38) % (Math.PI * 2);
+            (w.wheel.rotation.x + (forwardSpeed * dt) / 0.41) % (Math.PI * 2);
           const steerTarget = w.front ? visualSteer * 0.34 : 0;
           w.pivot.rotation.y += (steerTarget - w.pivot.rotation.y) * alpha;
           const compression = Math.max(
@@ -1949,7 +2114,11 @@ export function createScene(canvas, audioSystem = null) {
             ? Math.max(0, mine.target.speed)
             : 0;
 
-        // Smooth chase camera distance and height inspired by the solid 1fc22f6 feel
+        cameraTransition = Math.min(1, cameraTransition + dt / 0.65);
+        for (const c of cars.values())
+          for (const mesh of c.cockpitOccluders)
+            mesh.isVisible = !(c === mine && cameraMode === "cockpit");
+        // Chase keeps the full car readable; cockpit follows the driver exactly once settled.
         const camDist = 8.9 + Math.min(2.4, speed * 0.045);
         const camHeight = 3.5 + Math.min(0.9, speed * 0.018);
 
@@ -1966,11 +2135,37 @@ export function createScene(canvas, audioSystem = null) {
 
         const prevCamX = camera.position.x;
         const prevCamZ = camera.position.z;
-
+        if (cameraMode === "cockpit" && cameraAnchorReady) {
+          const dx = p.x - previousCameraAnchor.x,
+            dy = p.y - previousCameraAnchor.y,
+            dz = p.z - previousCameraAnchor.z;
+          camera.position.x += dx;
+          camera.position.y += dy;
+          camera.position.z += dz;
+          lookSpring.x += dx;
+          lookSpring.y += dy;
+          lookSpring.z += dz;
+        }
+        previousCameraAnchor.copyFrom(p);
+        cameraAnchorReady = true;
+        if (cameraMode === "cockpit")
+          cameraDesired.set(
+            px + Math.sin(safeYaw) * 0.24,
+            py + 0.82 + Math.pow(1 - cameraTransition, 2) * 2,
+            pz + Math.cos(safeYaw) * 0.24,
+          );
+        if (cameraMode === "overhead")
+          cameraDesired.set(
+            px - Math.sin(safeYaw) * 10,
+            py + 27,
+            pz - Math.cos(safeYaw) * 10,
+          );
         Vector3.LerpToRef(
           camera.position,
           cameraDesired,
-          1 - Math.exp(-8 * dt),
+          cameraMode === "cockpit" && cameraTransition === 1
+            ? 1
+            : 1 - Math.exp(-(cameraMode === "overhead" ? 6 : 12) * dt),
           camera.position,
         );
 
@@ -1993,35 +2188,62 @@ export function createScene(canvas, audioSystem = null) {
           py + 1.25,
           pz + Math.cos(safeYaw) * lookDist,
         );
+        if (cameraMode === "cockpit")
+          cameraLook.set(
+            px + Math.sin(safeYaw) * 45,
+            py + 0.82,
+            pz + Math.cos(safeYaw) * 45,
+          );
+        if (cameraMode === "overhead")
+          cameraLook.set(
+            px + Math.sin(safeYaw) * 6,
+            py,
+            pz + Math.cos(safeYaw) * 6,
+          );
         if (Vector3.DistanceSquared(camera.position, cameraLook) > 0.01) {
           Vector3.LerpToRef(
             lookSpring,
             cameraLook,
-            1 - Math.exp(-10 * dt),
+            cameraMode === "cockpit" && cameraTransition === 1
+              ? 1
+              : 1 - Math.exp(-12 * dt),
             lookSpring,
           );
           camera.setTarget(lookSpring);
         }
 
         // Speed FOV expansion (intense tunnel vision at top speed, clamped safely)
-        const targetFov = 0.82 + Math.min(0.12, (speed / 50) * 0.12);
+        const targetFov =
+          cameraMode === "overhead"
+            ? 0.76
+            : cameraMode === "cockpit"
+              ? 0.94
+              : 0.82 + Math.min(0.1, (speed / 50) * 0.1);
         camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-6 * dt));
         camera.fov = Math.max(
           0.7,
           Math.min(0.98, Number.isFinite(camera.fov) ? camera.fov : 0.82),
         );
       } else {
+        for (const c of cars.values())
+          for (const mesh of c.cockpitOccluders) mesh.isVisible = true;
+        cameraAnchorReady = false;
         // Cinematic orbit in lobby / results
         const t = now * 0.00015;
         camera.fov += (0.82 - camera.fov) * (1 - Math.exp(-4 * dt));
-        cameraOrbit.set(120 + Math.sin(t) * 75, 55, Math.cos(t) * 75);
+        const focus = point(0);
+        cameraOrbit.set(
+          focus.x + Math.sin(t) * 75,
+          55,
+          focus.z + Math.cos(t) * 75,
+        );
         Vector3.LerpToRef(
           camera.position,
           cameraOrbit,
           1 - Math.exp(-2 * dt),
           camera.position,
         );
-        cameraLook.set(120, 2, 0);
+        cameraLook.set(focus.x, 2, focus.z);
         Vector3.LerpToRef(
           lookSpring,
           cameraLook,
@@ -2139,11 +2361,36 @@ export function createScene(canvas, audioSystem = null) {
 
   return {
     update,
+    camera: (mode) => {
+      if (
+        ["chase", "cockpit", "overhead"].includes(mode) &&
+        mode !== cameraMode
+      ) {
+        cameraMode = mode;
+        cameraTransition = 0;
+        cameraAnchorReady = false;
+      }
+    },
     metrics: () => {
       const values = Array.from(
         frameTimes.slice(0, Math.min(frameCount, 360)),
       ).sort((a, b) => a - b);
       return {
+        cameraMode,
+        trackId: track.id,
+        camera: {
+          position: {
+            x: camera.position.x,
+            y: camera.position.y,
+            z: camera.position.z,
+          },
+          target: {
+            x: camera.getTarget().x,
+            y: camera.getTarget().y,
+            z: camera.getTarget().z,
+          },
+          fov: camera.fov,
+        },
         frames: frameCount,
         failedFrames,
         meanFrameMs:
@@ -2158,6 +2405,7 @@ export function createScene(canvas, audioSystem = null) {
         interpolationMs: smoothInterpDelay,
         quality: qualityLevel,
         resolution,
+        shadowMapSize: shadowGen?.mapSize || 0,
         poses: [...cars.values()].map((c) => ({
           id: c.root.name,
           x: c.root.position.x,
@@ -2190,6 +2438,8 @@ export function createScene(canvas, audioSystem = null) {
       qualityElapsed = qualitySum = qualityFrames = 0;
       engine.setHardwareScalingLevel(resolution);
       if (shadowGen) {
+        const shadowSize = level < 2 ? 512 : 1024;
+        if (shadowGen.mapSize !== shadowSize) shadowGen.mapSize = shadowSize;
         if (level === 0) {
           scene.shadowsEnabled = false;
         } else if (level === 1) {

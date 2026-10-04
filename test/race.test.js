@@ -3,91 +3,118 @@ import assert from "node:assert/strict";
 import { io } from "socket.io-client";
 import { Race } from "../server/race.js";
 import { createGame } from "../server/index.js";
-import { point, LENGTH, nearest } from "../shared/track.js";
+import { overlap } from "../shared/contact.js";
+import { validSnapshot } from "../shared/protocol.js";
+import { TRACKS, getTrack } from "../shared/track.js";
 
-test("circuit has left/right turns, sweepers, gentle bends and a long straight", () => {
-  let left = false,
-    right = false,
-    sweepers = false,
-    gentle = false,
-    straight = 0,
-    longest = 0;
-  for (let s = 0; s < LENGTH; s++) {
-    const a = point(s),
-      b = point(s + 1);
-    const turn = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw));
-    left ||= turn < -0.01;
-    right ||= turn > 0.01;
-    sweepers ||= Math.abs(turn) > 0.015;
-    gentle ||= Math.abs(turn) > 0.005 && Math.abs(turn) <= 0.015;
-    straight = Math.abs(turn) < 0.001 ? straight + 1 : 0;
-    longest = Math.max(longest, straight);
+test("all four circuits are continuous, wide and have smooth long-radius corners", () => {
+  assert.equal(TRACKS.length, 4);
+  assert.equal(new Set(TRACKS.map((t) => t.id)).size, 4);
+  for (const track of TRACKS) {
+    assert.equal(getTrack(track.id), track);
+    assert.ok(track.width >= 24 && track.length > 1400);
+    assert.equal(track.gates.length, 24);
+    for (let s = 0; s < track.length; s += 0.7) {
+      const a = track.point(s),
+        b = track.point(s + 1);
+      const turn = Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw));
+      assert.ok(
+        Math.abs(turn) < 0.035,
+        track.id + " corner radius stays above 28 metres",
+      );
+      assert.ok(Math.abs(track.nearest(a.x, a.z).s - s) < 0.001);
+      assert.ok(a.x > track.bounds.minX && a.x < track.bounds.maxX);
+      assert.ok(a.z > track.bounds.minZ && a.z < track.bounds.maxZ);
+    }
+    const a = track.point(-0.001),
+      b = track.point(0.001);
+    assert.ok(Math.hypot(a.x - b.x, a.z - b.z) < 0.003);
+    assert.ok(
+      Math.abs(Math.atan2(Math.sin(a.yaw - b.yaw), Math.cos(a.yaw - b.yaw))) <
+        0.001,
+    );
   }
-  assert.ok(left && right && sweepers && gentle);
-  assert.ok(longest >= 80);
 });
-test("track is continuous and nearest recovers distance", () => {
-  for (let s = 0; s < LENGTH; s += 0.7) {
-    const p = point(s);
-    assert.ok(Math.abs(nearest(p.x, p.z).s - s) < 0.001);
+test("all circuits support acceleration, brakes, contacts, barriers and safe reset", () => {
+  for (const track of TRACKS) {
+    const r = new Race(track.id),
+      c = r.add("a", 0);
+    let now = 10000;
+    const initial = c.b.position.z;
+    c.input = { up: true };
+    for (let i = 0; i < 100; i++) {
+      c.inputAt = now;
+      r.step(1 / 60, now, true, 10000);
+      now += 1000 / 60;
+    }
+    assert.ok(c.b.position.z > initial + 10, track.id);
+    assert.ok(c.b.position.y > 0.3 && c.b.position.y < 0.7);
+    c.input = { down: true };
+    for (let i = 0; i < 220; i++) {
+      c.inputAt = now;
+      r.step(1 / 60, now, true, 10000);
+      now += 1000 / 60;
+    }
+    assert.ok(c.b.velocity.z < 0, track.id + " reverses");
+    const wall = track.point(0, track.width / 2 - 2);
+    c.b.position.set(wall.x, 0.55, wall.z);
+    c.yaw = wall.yaw + Math.PI / 2;
+    c.input = { up: true };
+    for (let i = 0; i < 180; i++) {
+      c.inputAt = now;
+      r.step(1 / 60, now, true, 10000);
+      now += 1000 / 60;
+    }
+    assert.ok(
+      track.nearest(c.b.position.x, c.b.position.z).distance < track.width / 2,
+      track.id + " barrier contains car",
+    );
+    const rival = r.add("b", 1),
+      p = track.point(80);
+    c.b.position.set(p.x, 0.55, p.z);
+    rival.b.position.set(p.x, 0.55, p.z);
+    c.yaw = rival.yaw = p.yaw;
+    c.b.quaternion.setFromEuler(0, p.yaw, 0);
+    rival.b.quaternion.setFromEuler(0, p.yaw, 0);
+    c.input = {};
+    rival.input = {};
+    c.b.velocity.setZero();
+    rival.b.velocity.setZero();
+    r.step(1 / 60, now, true, 10000);
+    const pose = (v) => ({ x: v.b.position.x, z: v.b.position.z, yaw: v.yaw });
+    const hit = overlap(pose(c), pose(rival));
+    assert.ok(!hit || hit.depth < 0.08, track.id + " contacts separate cars");
+    assert.equal(r.reset(c), true);
+    assert.ok(
+      !overlap(pose(c), pose(rival), 0.2),
+      track.id + " reset finds free space",
+    );
+    for (const car of r.snapshot())
+      assert.ok([car.x, car.z, car.vx, car.vz, car.yaw].every(Number.isFinite));
   }
-  assert.ok(
-    Math.hypot(
-      point(-0.001).x - point(0.001).x,
-      point(-0.001).z - point(0.001).z,
-    ) < 0.003,
-  );
 });
-test("server physics accelerates, brakes, reverses, collides and remains grounded", () => {
-  const r = new Race(),
-    c = r.add("a", 0);
-  let now = 10000;
-  const initialZ = c.b.position.z;
-  c.input = { up: true };
-  for (let i = 0; i < 100; i++) {
-    c.inputAt = now;
-    r.step(1 / 60, now, true, 10000);
-    now += 1000 / 60;
+test("each circuit rejects skipped/backward checkpoints and finishes three ordered laps", () => {
+  for (const track of TRACKS) {
+    const r = new Race(track.id),
+      c = r.add("a", 0);
+    function cross(n, back = false) {
+      const distance = (n * track.length) / 24;
+      const a = track.point(distance - (back ? -1 : 1));
+      const b = track.point(distance + (back ? -1 : 1));
+      c.previous = a;
+      c.b.position.set(b.x, 0.5, b.z);
+      r.progress(c, 10000 + n * 100, 10000);
+    }
+    cross(3);
+    assert.equal(c.passed, 0);
+    cross(1, true);
+    assert.equal(c.passed, 0);
+    for (let n = 1; n <= 72; n++) cross(n);
+    assert.equal(c.passed, 72);
+    assert.equal(c.finished, 7200);
+    r.reset(c);
+    assert.equal(c.passed, 72);
   }
-  assert.ok(c.b.position.z > initialZ + 10);
-  assert.ok(c.b.position.y > 0.3 && c.b.position.y < 0.7);
-  c.input = { down: true };
-  for (let i = 0; i < 220; i++) {
-    c.inputAt = now;
-    r.step(1 / 60, now, true, 10000);
-    now += 1000 / 60;
-  }
-  assert.ok(c.b.velocity.z < 0);
-  c.b.position.set(126, 0.55, 0);
-  c.yaw = Math.PI / 2;
-  c.input = { up: true };
-  for (let i = 0; i < 180; i++) {
-    c.inputAt = now;
-    r.step(1 / 60, now, true, 10000);
-    now += 1000 / 60;
-  }
-  assert.ok(c.b.position.x < 132, "barrier contains car");
-});
-test("checkpoints reject skips/backward crossings; 3 ordered laps finish", () => {
-  const r = new Race(),
-    c = r.add("a", 0);
-  function cross(n, back = false) {
-    const s = (n * LENGTH) / 24,
-      a = point(s - (back ? -1 : 1)),
-      b = point(s + (back ? -1 : 1));
-    c.previous = a;
-    c.b.position.set(b.x, 0.5, b.z);
-    r.progress(c, 10000 + n * 100, 10000);
-  }
-  cross(3);
-  assert.equal(c.passed, 0);
-  cross(1, true);
-  assert.equal(c.passed, 0);
-  for (let n = 1; n <= 72; n++) cross(n);
-  assert.equal(c.passed, 72);
-  assert.equal(c.finished, 7200);
-  r.reset(c);
-  assert.equal(c.passed, 72);
 });
 test("stale inputs stop accelerating and lobby ignores inputs", () => {
   const r = new Race(),
@@ -100,22 +127,27 @@ test("stale inputs stop accelerating and lobby ignores inputs", () => {
   r.step(1 / 60, 10000, false, 0);
   assert.ok(Math.abs(c.b.velocity.z) < 0.01);
 });
-test("a car can physically drive three complete laps through every checkpoint", () => {
-  const r = new Race(),
-    c = r.add("driver", 0);
-  let now = 10000;
-  for (let i = 0; i < 18000 && !c.finished; i++) {
-    const p = c.b.position,
-      target = point(nearest(p.x, p.z).s + 10),
-      desired = Math.atan2(target.x - p.x, target.z - p.z),
-      error = Math.atan2(Math.sin(desired - c.yaw), Math.cos(desired - c.yaw));
-    c.input = { up: true, left: error < -0.045, right: error > 0.045 };
-    c.inputAt = now;
-    r.step(1 / 60, now, true, 10000);
-    now += 1000 / 60;
+test("a car can physically drive three complete laps on every circuit", () => {
+  for (const track of TRACKS) {
+    const r = new Race(track.id),
+      c = r.add("driver", 0);
+    let now = 10000;
+    for (let i = 0; i < 18000 && !c.finished; i++) {
+      const p = c.b.position,
+        target = track.point(track.nearest(p.x, p.z).s + 10);
+      const desired = Math.atan2(target.x - p.x, target.z - p.z);
+      const error = Math.atan2(
+        Math.sin(desired - c.yaw),
+        Math.cos(desired - c.yaw),
+      );
+      c.input = { up: true, left: error < -0.045, right: error > 0.045 };
+      c.inputAt = now;
+      r.step(1 / 60, now, true, 10000);
+      now += 1000 / 60;
+    }
+    assert.equal(c.passed, 72, track.id);
+    assert.ok(c.finished > 10000 && c.finished < 300000, track.id);
   }
-  assert.equal(c.passed, 72);
-  assert.ok(c.finished > 10000 && c.finished < 300000);
 });
 test("real Socket.IO clients: validation, isolation, host authority, movement, results, rematch, cleanup", async (t) => {
   const game = await createGame();
@@ -151,6 +183,8 @@ test("real Socket.IO clients: validation, isolation, host authority, movement, r
   const created = await send(a, "enter", { name: "Alpha", create: true });
   assert.equal(created.ok, true);
   const room = game.rooms.get(created.code);
+  const initialTrack = room.race.track.id;
+  assert.ok(TRACKS.some((t) => t.id === initialTrack));
   assert.equal((await send(a, "start")).ok, true);
   room.startAt = Date.now() - 1000;
   await new Promise((r) => setTimeout(r, 80));
@@ -160,6 +194,8 @@ test("real Socket.IO clients: validation, isolation, host authority, movement, r
   assert.equal(room.phase, "results");
   assert.equal((await send(a, "rematch")).ok, true);
   assert.equal(room.phase, "lobby");
+  assert.notEqual(room.race.track.id, initialTrack);
+  const rematchTrack = room.race.track.id;
   assert.equal(
     (await send(b, "enter", { name: "Bravo", code: created.code })).ok,
     true,
@@ -183,6 +219,10 @@ test("real Socket.IO clients: validation, isolation, host authority, movement, r
   assert.ok(room.race.cars.get(a.id).b.position.z > initial);
   assert.ok(bState.cars.find((p) => p.id === a.id).z > initial);
   assert.equal(bState.players.length, 2);
+  assert.equal(bState.trackId, rematchTrack);
+  assert.equal(validSnapshot(bState), true);
+  assert.equal(validSnapshot({ ...bState, trackId: "invalid" }), false);
+  assert.equal(room.race.track.id, rematchTrack);
   room.race.cars.get(a.id).finished = 1200;
   room.race.cars.get(b.id).finished = 1500;
   await new Promise((r) => setTimeout(r, 80));
